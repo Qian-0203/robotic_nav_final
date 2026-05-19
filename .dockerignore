@@ -1,0 +1,6 @@
+*
+!docker/
+!docker/yolo-cuda131/
+!docker/yolo-cuda131/Dockerfile
+!docker/yolo-cuda131/requirements.txt
+!docker/yolo-cuda131/train_yolo.sh

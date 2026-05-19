@@ -1,0 +1,70 @@
+# Local agent/tool state
+.codex
+.codex/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.python-version
+.venv/
+venv/
+env/
+ENV/
+pip-wheel-metadata/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ROS / colcon / catkin generated output
+build/
+install/
+log/
+devel/
+.catkin_tools/
+.colcon/
+
+# Local Unity build/workspace
+workspace/pros/pros_twin_unity_linux_V3/
+
+# Runtime logs and temporary files
+*.log
+*.tmp
+*.temp
+tmp/
+temp/
+
+# ROS bag and database captures
+*.bag
+*.bag.active
+*.db3
+rosbag2_*/
+
+# YOLO / ML training outputs and exported model artifacts
+runs/
+wandb/
+mlruns/
+*.pt
+*.pth
+*.onnx
+*.engine
+*.tflite
+*.pb
+
+# Docker Compose local overrides and env files
+docker-compose.override.yml
+.env
+.env.*
+!.env.example
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
