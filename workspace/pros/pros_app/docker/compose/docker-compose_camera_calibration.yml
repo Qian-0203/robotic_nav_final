@@ -1,6 +1,6 @@
 services:
   calibration:
-    image: ghcr.io/screamlab/pros_camera_calibration:latest
+    image: ${PROS_CAMERA_CALIBRATION_IMAGE:-ghcr.io/screamlab/pros_camera_calibration:latest}
     env_file:
       - .env
     volumes:
@@ -15,4 +15,5 @@ services:
 
 networks:
   my_bridge_network:
-    driver: bridge
+    name: compose_my_bridge_network
+    external: true

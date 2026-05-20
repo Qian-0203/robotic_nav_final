@@ -1,14 +1,21 @@
 services:
   lidar_tranform:
-    image: ghcr.io/screamlab/pros_unity_lidar_trans_image:latest
+    image: ${PROS_UNITY_LIDAR_TRANS_IMAGE:-ghcr.io/screamlab/pros_unity_lidar_trans_image:latest}
     env_file:
       - .env
+    volumes:
+      - ./demo:/workspace/demo:ro
     networks:
       - my_bridge_network
-    command: "ros2 run unity_lidar_transformer lidar_transformer_node"
+    command: >
+      python3 /workspace/demo/unity_scan_relay.py
+      --ros-args
+      -p input_topic:=/scan_tmp
+      -p output_topic:=/scan
+      -p output_frame:=laser
 
   localization:
-    image: ghcr.io/screamlab/pros_jetson_driver_image:0.1.0
+    image: ${PROS_DRIVER_IMAGE:-ghcr.io/screamlab/pros_jetson_driver_image:0.1.0}
     env_file:
       - .env
     volumes:
@@ -20,7 +27,7 @@ services:
     command: "ros2 launch /workspace/demo/localization_unity.xml"
 
   rosbridge:
-    image: ghcr.io/screamlab/pros_base_image:0.0.2
+    image: ${PROS_BASE_IMAGE:-ghcr.io/screamlab/pros_base_image:0.0.2}
     env_file:
       - .env
     networks:
@@ -30,7 +37,7 @@ services:
     command: " ros2 launch rosbridge_server rosbridge_websocket_launch.xml"
 
   foxglove_bridge:
-    image: us-central1-docker.pkg.dev/foxglove-images/images/foxglove_bridge:ros-humble-v3.2.6
+    image: ${FOXGLOVE_BRIDGE_IMAGE:-us-central1-docker.pkg.dev/foxglove-images/images/foxglove_bridge:ros-humble-v3.2.6}
     env_file:
       - .env
     networks:
@@ -40,4 +47,5 @@ services:
 
 networks:
   my_bridge_network:
-    driver: bridge
+    name: compose_my_bridge_network
+    external: true

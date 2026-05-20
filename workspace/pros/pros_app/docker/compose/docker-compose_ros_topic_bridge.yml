@@ -1,6 +1,6 @@
 services:
   ros_topic_bridge:
-    image: ghcr.io/screamlab/pros_jetson_driver_image:0.1.1
+    image: ${PROS_DRIVER_IMAGE:-ghcr.io/screamlab/pros_jetson_driver_image:0.1.1}
     env_file:
       - .env
     volumes:
@@ -12,4 +12,5 @@ services:
 
 networks:
   my_bridge_network:
-    driver: bridge
+    name: compose_my_bridge_network
+    external: true

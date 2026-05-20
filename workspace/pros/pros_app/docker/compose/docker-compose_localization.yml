@@ -1,6 +1,6 @@
 services:
   localization:
-    image: ghcr.io/screamlab/pros_jetson_driver_image:0.1.0
+    image: ${PROS_DRIVER_IMAGE:-ghcr.io/screamlab/pros_jetson_driver_image:0.1.0}
     env_file:
       - .env
     volumes:
@@ -10,7 +10,7 @@ services:
     command: "ros2 launch /workspace/demo/localization.xml"
 
   rosbridge:
-    image: ghcr.io/screamlab/pros_base_image:0.0.2
+    image: ${PROS_BASE_IMAGE:-ghcr.io/screamlab/pros_base_image:0.0.2}
     env_file:
       - .env
     networks:
@@ -19,9 +19,10 @@ services:
       - 9090:9090
     command: " ros2 launch rosbridge_server rosbridge_websocket_launch.xml"
 
-# This will create a docker bridge network
-# docker network create --driver bridge pros_app_my_bridge_network
+# This reuses the shared PROS bridge network.
+# Create it with: docker network create --driver bridge compose_my_bridge_network
 # You can see the network by docker network ls
 networks:
   my_bridge_network:
-    driver: bridge
+    name: compose_my_bridge_network
+    external: true

@@ -14,6 +14,7 @@ find_package(std_msgs REQUIRED)  # 確保 std_msgs 被找到
 # find_package(<dependency> REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
+  "srv/GetLatestData.srv"
   "srv/GetScan.srv"
   DEPENDENCIES std_msgs
 )

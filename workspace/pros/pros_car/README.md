@@ -2,14 +2,20 @@
 ## class diagram
 ![pros_car](https://github.com/alianlbj23/pros_car/blob/main/img/pros_car.drawio.png?raw=true)
 ## 🚀 環境初始化
-1. 執行以下指令進入環境：
+1. 第一次使用或更新相依套件後，先建立 Jazzy 映像：
+   ```bash
+   docker build -f Dockerfile.jazzy -t pros_car:jazzy .
+   ```
+2. 執行以下指令進入環境：
    ```bash
    ./car_control.sh
    ```
-2. 在環境內輸入 `r` 來執行建置與設定：
+   啟動腳本會自動執行 `colcon build` 並載入 `install/setup.bash`。
+3. 如需在暫時容器內重新安裝相依套件：
    ```bash
-   r  # 進行 colcon build 並執行 . ./install/setup.bash
+   INSTALL_DEPENDENCIES=true ./car_control.sh
    ```
+   一般重複啟動不需要安裝套件，因為相依套件已在 `pros_car:jazzy` 映像中。
 
 ## 🚗 車輛控制
 執行以下指令來開始車輛控制：
@@ -55,14 +61,20 @@ ros2 run pros_car_py robot_control
 # pros_car Usage Guide
 
 ## 🚀 Environment Setup
-1. Enter the environment by running:
+1. Build the Jazzy image the first time or after dependency changes:
+   ```bash
+   docker build -f Dockerfile.jazzy -t pros_car:jazzy .
+   ```
+2. Enter the environment by running:
    ```bash
    ./car_control.sh
    ```
-2. Inside the environment, enter `r` to build and set up:
+   The launcher runs `colcon build` and sources `install/setup.bash` automatically.
+3. To refresh dependencies inside the temporary container:
    ```bash
-   r  # Run colcon build and source setup.bash
+   INSTALL_DEPENDENCIES=true ./car_control.sh
    ```
+   Normal repeated launches skip dependency installation because dependencies are baked into `pros_car:jazzy`.
 
 ## 🚗 Vehicle Control
 Start vehicle control by running:
@@ -102,4 +114,3 @@ There are **two autonomous navigation modes**:
 - **Function**: `car_controller.py` internally **publishes** `/goal_pose` coordinates for automatic navigation.
 
 📢 **Note**: Press `q` at any time to **stop the vehicle immediately** and exit navigation mode.
-

@@ -1,13 +1,16 @@
-version: '3.7'
-
 services:
   car:
-    image: ${PROS_AI_IMAGE:-ghcr.io/otischung/pros_ai_image:latest}
+    build:
+      context: .
+      dockerfile: Dockerfile.jazzy
+    image: pros_car:jazzy
     env_file:
       - .env
+    environment:
+      ROS_DISTRO: jazzy
     volumes:
       - ./src:/workspaces/src:ro
-      - ./car_control_for_docker_compose.sh:/workspaces/car_control_for_docker_compose.sh
+      - ./car_control_for_docker_compose.sh:/workspaces/car_control_for_docker_compose.sh:ro
     networks:
       - my_bridge_network
     ports:

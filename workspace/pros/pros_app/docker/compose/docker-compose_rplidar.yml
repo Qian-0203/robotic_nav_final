@@ -1,6 +1,6 @@
 services:
   rplidar:
-    image: ghcr.io/screamlab/pros_jetson_driver_image:0.1.0
+    image: ${PROS_DRIVER_IMAGE:-ghcr.io/screamlab/pros_jetson_driver_image:0.1.0}
     env_file:
       - .env
     devices:
@@ -12,7 +12,7 @@ services:
     command: "ros2 launch /workspace/demo/rplidar.xml"
   
   lidar_angle_filter:
-    image: registry.screamtrumpet.csie.ncku.edu.tw/alianlbj23/pros_lidar_pkg_image:latest
+    image: ${PROS_LIDAR_PKG_IMAGE:-registry.screamtrumpet.csie.ncku.edu.tw/alianlbj23/pros_lidar_pkg_image:latest}
     env_file:
       - .env
     networks:
@@ -26,4 +26,5 @@ services:
 
 networks:
   my_bridge_network:
-    driver: bridge
+    name: compose_my_bridge_network
+    external: true

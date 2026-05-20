@@ -139,17 +139,62 @@ docker-compose -f <your-compose-file.yml> up
 ```yaml
 networks:
   my_bridge_network:
-    driver: bridge
+    name: compose_my_bridge_network
+    external: true
 ```
 
-執行時，若機器上的 docker 原本沒有 `pros_app_my_bridge_network`，則會自動新增
+目前 compose 檔案會共用外部 Docker network `compose_my_bridge_network`，避免不同 compose 專案重複建立 network 時發生 label 衝突。
 
-若是需要在執行 docker-compose 前就先行使用此 bridge network，亦可自行新增
+若機器上尚未建立此 network，請先執行：
 
 ```bash
-docker network create --driver bridge pros_app_my_bridge_network
+docker network create --driver bridge compose_my_bridge_network
 ```
 
+若 PROS App 顯示 rosbridge connect failed，先檢查 rosbridge 是否真的有啟動並監聽 `9090`：
+
+```bash
+docker ps --filter name=compose-rosbridge-1
+docker compose -f workspace/pros/pros_app/docker/compose/docker-compose_rosbridge_server.yml logs --tail=80 rosbridge
+```
+
+曾遇過的錯誤是 `compose_my_bridge_network` 已存在但不是 Compose 建立的 network，Docker Compose 會拒絕啟動 rosbridge。解法是讓 compose 使用上方的 `external: true` network 設定，或先建立 `compose_my_bridge_network` 後再啟動 PROS App。
+
+
+## ROS Node Architecture
+
+目前 PROS App 的 SLAM / rosbridge 架構如下：
+
+```mermaid
+flowchart LR
+    client[Foxglove / Web client] <-->|ws://host:9090| rosbridge[rosbridge_websocket]
+
+    robot_bringup[robot_bringup service<br/>robot_state_publisher]
+    slam[slam service<br/>slam_toolbox]
+    car[pros_car / Unity / sensor nodes]
+
+    robot_bringup -->|/tf_static| tf_static[/tf_static<br/>base_footprint -> base_link<br/>LiDAR_v1_1 -> laser<br/>URDF child frames/]
+    robot_bringup -->|/tf| tf[/tf/]
+
+    car -->|/scan| slam
+    car -->|/odom or odom TF| slam
+    slam -->|/map, /pose, /slam_toolbox/*| rosbridge
+    slam -->|map -> odom TF<br/>only when scan/odom exist| tf
+    tf --> rosbridge
+    tf_static --> rosbridge
+```
+
+Important checks:
+
+- `robot_bringup` must be running, otherwise static robot frames such as `base_link` and `laser` will be missing.
+- `slam_toolbox` needs `/scan` and odometry input before `map` and `odom` become valid TF frames.
+- If `/tf_static` exists but `map -> odom` is missing, check `/scan` and `/odom` publishers first:
+
+```bash
+docker exec compose-slam-1 bash -lc 'source /opt/ros/$ROS_DISTRO/setup.bash && ros2 topic info /scan -v'
+docker exec compose-slam-1 bash -lc 'source /opt/ros/$ROS_DISTRO/setup.bash && ros2 topic info /odom -v'
+docker exec compose-slam-1 bash -lc 'source /opt/ros/$ROS_DISTRO/setup.bash && ros2 run tf2_ros tf2_echo map odom'
+```
 
 
 ## ROS2 Image Transport Plugins

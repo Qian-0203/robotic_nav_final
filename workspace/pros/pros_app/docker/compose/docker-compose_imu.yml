@@ -1,6 +1,6 @@
 services:
   imu:
-    image: ghcr.io/screamlab/pros_imu:latest
+    image: ${PROS_IMU_IMAGE:-ghcr.io/screamlab/pros_imu:latest}
     env_file:
       - .env
     volumes:
@@ -35,9 +35,10 @@ services:
   #     - my_bridge_network
   #   command: "ros2 launch /workspace/demo/slam_imu.xml"
 
-# This will create a docker bridge network
-# docker network create --driver bridge pros_app_my_bridge_network
+# This reuses the shared PROS bridge network.
+# Create it with: docker network create --driver bridge compose_my_bridge_network
 # You can see the network by docker network ls
 networks:
   my_bridge_network:
-    driver: bridge
+    name: compose_my_bridge_network
+    external: true

@@ -4,6 +4,9 @@ import signal
 import subprocess
 import argparse
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+JAZZY_ENV_FILE = os.path.join(BASE_DIR, "docker", "compose", "jazzy.env.example")
+
 # List of shell scripts to choose from
 scripts = [
     "./slam.sh",
@@ -29,6 +32,35 @@ scripts = [
 child_pids = []
 
 
+def load_env_file(path):
+    """Load simple KEY=VALUE entries from an env file."""
+    env = {}
+    if not os.path.exists(path):
+        return env
+
+    with open(path, "r") as env_file:
+        for line in env_file:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+            if key:
+                env[key] = value
+
+    return env
+
+
+def build_jazzy_env():
+    """Build the environment used by the shell launchers."""
+    env = os.environ.copy()
+    env.update(load_env_file(JAZZY_ENV_FILE))
+    env["ROS_DISTRO"] = "jazzy"
+    return env
+
+
 def clear_screen():
     """Clear console screen (Windows or Unix)."""
     os.system("cls" if os.name == "nt" else "clear")
@@ -37,7 +69,7 @@ def clear_screen():
 def show_menu():
     """Display the main menu."""
     clear_screen()
-    print("Choose a script to run:")
+    print("Choose a Jazzy script to run:")
     for i, script in enumerate(scripts, start=1):
         print(f"{i}. {script}")
     print("s. Show running processes")
@@ -112,13 +144,23 @@ def run_script(script, print_logs=True):
       - 'q': kill the process
       - 'b': return to menu (process stays running in background if still alive)
     """
+    env = build_jazzy_env()
+    if os.path.exists(JAZZY_ENV_FILE):
+        print(f"Using Jazzy env: {JAZZY_ENV_FILE}")
+    else:
+        print(f"[警告] Jazzy env file not found: {JAZZY_ENV_FILE}")
+
     if print_logs:
         print(f"Running {script} with logs...")
-        p = subprocess.Popen(["/bin/bash", script])
+        p = subprocess.Popen(["/bin/bash", script], cwd=BASE_DIR, env=env)
     else:
         print(f"Running {script} without logs...")
         p = subprocess.Popen(
-            ["/bin/bash", script], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            ["/bin/bash", script],
+            cwd=BASE_DIR,
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
 
     # Record the PID
@@ -162,7 +204,7 @@ def check_and_pull_docker_image(script_name):
     """
     檢查腳本中是否有需要的 Docker 映像，若不存在則執行 docker pull 並顯示進度。
     """
-    with open(script_name, "r") as script_file:
+    with open(os.path.join(BASE_DIR, script_name), "r") as script_file:
         script_content = script_file.read()
 
     # 提取 docker run 或 docker pull 中的映像名稱

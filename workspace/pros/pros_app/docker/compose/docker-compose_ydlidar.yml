@@ -1,6 +1,6 @@
 services:
   rplidar:
-    image: ghcr.io/otischung/pros_ai_image:latest
+    image: ${PROS_AI_IMAGE:-ghcr.io/otischung/pros_ai_image:latest}
     env_file:
       - .env
     devices:
@@ -13,4 +13,5 @@ services:
 
 networks:
   my_bridge_network:
-    driver: bridge
+    name: compose_my_bridge_network
+    external: true

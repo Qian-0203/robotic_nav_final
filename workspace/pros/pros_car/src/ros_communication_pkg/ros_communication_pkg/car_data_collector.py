@@ -5,7 +5,7 @@ from geometry_msgs.msg import PoseWithCovarianceStamped, PoseStamped, PointStamp
 from sensor_msgs.msg import LaserScan
 from visualization_msgs.msg import Marker
 from nav_msgs.msg import Path
-from ros_communication_pkg.srv import GetLatestData
+from custome_interfaces.srv import GetLatestData
 
 
 class CarROSCommunicator(Node):

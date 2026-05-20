@@ -1,0 +1,21 @@
+services:
+  yolo:
+    build:
+      context: .
+      dockerfile: Dockerfile.jazzy
+    image: ros2_yolo_integration:jazzy
+    env_file:
+      - .env
+    environment:
+      ROS_DISTRO: jazzy
+    volumes:
+      - ./src:/workspaces/src:ro
+      - ./screenshots:/workspaces/screenshots
+      - ./fps_screenshots:/workspaces/fps_screenshots
+    networks:
+      - my_bridge_network
+    command: bash -lc "colcon build && source install/setup.bash && bash"
+
+networks:
+  my_bridge_network:
+    driver: bridge

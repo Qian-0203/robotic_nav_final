@@ -1,0 +1,32 @@
+FROM ros:jazzy-ros-base-noble
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV ROS2_WS=/workspaces
+ENV ROS_DOMAIN_ID=1
+ENV ROS_DISTRO=jazzy
+
+SHELL ["/bin/bash", "-c"]
+
+COPY ./requirements.txt /tmp/requirements.txt
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3-argcomplete \
+    python3-colcon-common-extensions \
+    python3-pip \
+    python3-rosdep \
+    python3-scipy \
+    python3-serial \
+    python3-yaml \
+    ros-${ROS_DISTRO}-cv-bridge \
+    ros-${ROS_DISTRO}-nav2-msgs \
+    ros-${ROS_DISTRO}-rosbridge-server \
+    ros-${ROS_DISTRO}-tf2-geometry-msgs \
+    ros-${ROS_DISTRO}-tf2-ros \
+    && rosdep update --rosdistro ${ROS_DISTRO} \
+    && python3 -m pip install --break-system-packages --no-cache-dir -r /tmp/requirements.txt \
+    && rm -rf /var/lib/apt/lists/* /tmp/requirements.txt
+
+WORKDIR ${ROS2_WS}
+
+ENTRYPOINT ["/ros_entrypoint.sh"]
+CMD ["bash", "-l"]

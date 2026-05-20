@@ -1,6 +1,6 @@
 services:
   dabai:
-    image: ghcr.io/screamlab/pros_jetson_driver_image:0.1.0
+    image: ${PROS_DRIVER_IMAGE:-ghcr.io/screamlab/pros_jetson_driver_image:0.1.0}
     env_file:
       - .env
     devices:
@@ -16,7 +16,7 @@ services:
     - depth_fps:=30
 
   rosbridge:
-    image: ghcr.io/screamlab/pros_base_image:0.0.2
+    image: ${PROS_BASE_IMAGE:-ghcr.io/screamlab/pros_base_image:0.0.2}
     env_file:
       - .env
     networks:
@@ -26,7 +26,7 @@ services:
     command: "ros2 launch rosbridge_server rosbridge_websocket_launch.xml"
 
   compress:
-    image: ghcr.io/screamlab/pros_jetson_driver_image:0.1.0
+    image: ${PROS_DRIVER_IMAGE:-ghcr.io/screamlab/pros_jetson_driver_image:0.1.0}
     env_file:
       - .env
     networks:
@@ -37,4 +37,5 @@ services:
 
 networks:
   my_bridge_network:
-    driver: bridge
+    name: compose_my_bridge_network
+    external: true

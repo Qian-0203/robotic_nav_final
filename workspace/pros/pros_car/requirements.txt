@@ -1,3 +1,4 @@
 orjson>=3.10.0
+pydantic>=2.7.0
 pybullet>=3.2.6
 urwid>=2.6.0
