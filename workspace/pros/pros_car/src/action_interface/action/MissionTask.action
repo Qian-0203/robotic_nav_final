@@ -1,0 +1,7 @@
+# Task identifier, for example: task1_bear, task2_bridge, task3_knob
+string task_id
+---
+bool success
+string message
+---
+string phase

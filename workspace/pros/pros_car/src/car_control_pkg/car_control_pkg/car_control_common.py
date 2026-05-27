@@ -65,6 +65,7 @@ class BaseCarControlNode(Node):
 
     def __init__(self, node_name, enable_nav_subscribers=False):
         super().__init__(node_name)
+        self.declare_parameter("object_nav_label", "bear")
 
         # Create common publishers
         self.rear_wheel_pub, self.front_wheel_pub = (
@@ -227,6 +228,9 @@ class BaseCarControlNode(Node):
             return self.object_coordinates
         # 單一物體回傳
         return self.object_coordinates.get(label, None)
+
+    def get_object_nav_label(self):
+        return self.get_parameter("object_nav_label").value
 
     def get_goal_pose(self):
         """Get goal position or None if unavailable"""

@@ -11,6 +11,7 @@ find_package(rosidl_default_generators REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
   "action/NavGoal.action"
   "action/ArmGoal.action"
+  "action/MissionTask.action"
 )
 # uncomment the following section in order to fill in
 # further dependencies manually.

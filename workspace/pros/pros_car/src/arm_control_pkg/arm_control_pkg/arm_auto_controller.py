@@ -76,21 +76,59 @@ class ArmAutoController:
         return ArmGoal.Result(success=True, message="success")
         # self.arm_agnle_control.arm_all_change([])
 
-    def catch(self, should_cancel=lambda: False):
-        label = "tennis"
+    def pickup_bear(self, should_cancel=lambda: False):
+        return self.catch(label="bear", should_cancel=should_cancel)
+
+    def place_bear(self, should_cancel=lambda: False):
+        if should_cancel():
+            return ArmGoal.Result(success=False, message="Canceled by user")
+        self.init_pose(grap=True)
+        time.sleep(0.5)
+        self.arm_agnle_control.arm_index_change(4, 70.0)
+        self.arm_commute_node.publish_arm_angle()
+        time.sleep(0.5)
+        self.init_pose(grap=False)
+        return ArmGoal.Result(success=True, message="bear placed")
+
+    def open_knob(self, should_cancel=lambda: False):
+        label = "knob"
+        deadline = time.monotonic() + 10.0
+        while time.monotonic() < deadline:
+            if should_cancel():
+                return ArmGoal.Result(success=False, message="Canceled by user")
+            follow_result = self.follow_obj(label=label, target_depth=0.35, step=5)
+            if follow_result is True:
+                break
+            time.sleep(0.1)
+        self.move_forward_backward(direction="forward", distance=0.08)
+        time.sleep(0.3)
+        self.arm_agnle_control.arm_index_change(3, 90.0)
+        self.arm_commute_node.publish_arm_angle()
+        time.sleep(0.4)
+        self.arm_agnle_control.arm_index_change(3, 180.0)
+        self.arm_commute_node.publish_arm_angle()
+        time.sleep(0.4)
+        self.move_forward_backward(direction="backward", distance=0.08)
+        self.init_pose()
+        return ArmGoal.Result(success=True, message="knob opened")
+
+    def catch(self, label=None, should_cancel=lambda: False):
+        if label is None:
+            label = self.arm_commute_node.get_object_label()
         while self.depth > 0.4:
+            if should_cancel():
+                return ArmGoal.Result(success=False, message="Canceled by user")
             print(self.depth)
             try:
                 self.depth = self.arm_commute_node.get_latest_object_coordinates(label=label)[0]
             except:
+                time.sleep(0.1)
                 continue
         while 1:
             if should_cancel():
                 return ArmGoal.Result(success=False, message="Canceled by user")
             if self.follow_obj(label=label)  == True:
                 break
-            # if self.follow_obj(label="ball") == True:
-            #     break
 
         # reset depth
         self.depth = 100.0
@@ -224,10 +262,11 @@ class ArmAutoController:
             time.sleep(1.0)
 
     def object_follow(self, should_cancel=lambda: False):
+        label = self.arm_commute_node.get_object_label()
         while 1:
             if should_cancel():
                 return ArmGoal.Result(success=False, message="Canceled by user")
-            self.follow_obj(label="tennis", step=5)
+            self.follow_obj(label=label, step=5)
 
     def radians_to_degrees(self, radians_list):
         """Converts a list of angles from radians to degrees."""
@@ -287,7 +326,9 @@ class ArmAutoController:
             and abs(z) <= 0.1
         )
 
-    def follow_obj(self, label="ball", target_depth=0.3, step=10):
+    def follow_obj(self, label=None, target_depth=0.3, step=10):
+        if label is None:
+            label = self.arm_commute_node.get_object_label()
         # 參數設定
         depth_threshold = 0.05
         lateral_threshold = 0.05

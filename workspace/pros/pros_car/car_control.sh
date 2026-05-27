@@ -1,13 +1,22 @@
 #!/bin/bash
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ENV_FILE="$SCRIPT_DIR/.env"
+
 # 1. 統一管理 -v 參數
-VOLUME_ARGS="-v $(pwd)/src:/workspaces/src -v $(pwd)/launch:/workspaces/launch"
+VOLUME_ARGS="-v $SCRIPT_DIR/src:/workspaces/src -v $SCRIPT_DIR/launch:/workspaces/launch -v $SCRIPT_DIR/task_bringup.sh:/workspaces/task_bringup.sh"
 
 # Port mapping check
 PORT_MAPPING=""
 if [ "$1" = "--port" ] && [ -n "$2" ] && [ -n "$3" ]; then
     PORT_MAPPING="-p $2:$3"
     shift 3  # Remove the first three arguments
+fi
+
+CONTAINER_CMD="/bin/bash"
+if [ "$1" = "--task" ]; then
+    CONTAINER_CMD="/workspaces/task_bringup.sh"
+    shift 1
 fi
 
 # 檢查系統架構與作業系統
@@ -65,10 +74,11 @@ if [ "$ARCH" = "aarch64" ]; then
         $PORT_MAPPING \
         $device_options \
         --runtime=nvidia \
-        --env-file .env \
-        -v "$(pwd)/src:/workspaces/src" \
+        --env-file "$ENV_FILE" \
+        -v "$SCRIPT_DIR/src:/workspaces/src" \
+        -v "$SCRIPT_DIR/task_bringup.sh:/workspaces/task_bringup.sh" \
         ghcr.io/screamlab/pros_car_docker_image:latest \
-        /bin/bash
+        $CONTAINER_CMD "$@"
 
 elif [ "$ARCH" = "x86_64" ] || ([ "$ARCH" = "arm64" ] && [ "$OS" = "Darwin" ]); then
     echo "Detected architecture: amd64 or macOS arm64"
@@ -79,10 +89,10 @@ elif [ "$ARCH" = "x86_64" ] || ([ "$ARCH" = "arm64" ] && [ "$OS" = "Darwin" ]); 
             --network compose_my_bridge_network \
             $PORT_MAPPING \
             $device_options \
-            --env-file .env \
+            --env-file "$ENV_FILE" \
             $VOLUME_ARGS \
             ghcr.io/screamlab/pros_car_docker_image:latest \
-            /bin/bash
+            $CONTAINER_CMD "$@"
     else
         echo "Trying to run with GPU support..."
         docker run -it --rm \
@@ -90,10 +100,10 @@ elif [ "$ARCH" = "x86_64" ] || ([ "$ARCH" = "arm64" ] && [ "$OS" = "Darwin" ]); 
             $PORT_MAPPING \
             $GPU_FLAGS \
             $device_options \
-            --env-file .env \
+            --env-file "$ENV_FILE" \
             $VOLUME_ARGS \
             ghcr.io/screamlab/pros_car_docker_image:latest \
-            /bin/bash
+            $CONTAINER_CMD "$@"
 
         # 如果 GPU 啟動失敗，回退到 CPU 模式
         if [ $? -ne 0 ]; then
@@ -101,11 +111,11 @@ elif [ "$ARCH" = "x86_64" ] || ([ "$ARCH" = "arm64" ] && [ "$OS" = "Darwin" ]); 
             docker run -it --rm \
                 --network compose_my_bridge_network \
                 $PORT_MAPPING \
-                --env-file .env \
+                --env-file "$ENV_FILE" \
                 $device_options \
                 $VOLUME_ARGS \
                 ghcr.io/screamlab/pros_car_docker_image:latest \
-                /bin/bash
+                $CONTAINER_CMD "$@"
         fi
     fi
 else

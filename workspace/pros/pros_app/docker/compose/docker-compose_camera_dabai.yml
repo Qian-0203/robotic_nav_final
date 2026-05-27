@@ -41,4 +41,5 @@ services:
 
 networks:
   my_bridge_network:
-    driver: bridge
+    external: true
+    name: compose_my_bridge_network

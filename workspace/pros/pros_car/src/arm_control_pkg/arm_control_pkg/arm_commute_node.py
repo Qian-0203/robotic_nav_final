@@ -20,6 +20,7 @@ from visualization_msgs.msg import Marker
 class ArmCummuteNode(Node):
     def __init__(self, arm_params, arm_angle_control):
         super().__init__("arm_commute_node")
+        self.declare_parameter("object_label", "bear")
         self.arm_angle_control = arm_angle_control
         # Load parameters first
         self.arm_params = arm_params.get_arm_params()
@@ -260,6 +261,9 @@ class ArmCummuteNode(Node):
             return self.object_coordinates
         # 單一物體回傳
         return self.object_coordinates.get(label, None)
+
+    def get_object_label(self):
+        return self.get_parameter("object_label").value
 
     def degrees_to_radians(self, degree_positions):
         """Convert a list of positions from degrees to radians using NumPy

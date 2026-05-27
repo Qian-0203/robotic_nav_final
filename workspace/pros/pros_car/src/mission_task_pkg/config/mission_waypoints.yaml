@@ -1,0 +1,45 @@
+# If use_waypoints is false, missions use YOLO search/servo for targets and
+# capture the current /amcl_pose as the start pose for return-home behavior.
+use_waypoints: false
+
+# Optional fallback poses. Enable use_waypoints only after tuning these in Unity.
+waypoints:
+  start:
+    x: 0.0
+    y: 0.0
+    yaw: 0.0
+    frame_id: map
+  bear_approach:
+    x: 1.0
+    y: 0.0
+    yaw: 0.0
+    frame_id: map
+  bridge_entry:
+    x: 2.0
+    y: 0.0
+    yaw: 0.0
+    frame_id: map
+  bridge_exit:
+    x: 3.0
+    y: 0.0
+    yaw: 0.0
+    frame_id: map
+  knob_approach:
+    x: 4.0
+    y: 0.0
+    yaw: 0.0
+    frame_id: map
+  door_inside:
+    x: 5.0
+    y: 0.0
+    yaw: 0.0
+    frame_id: map
+
+visual_servo:
+  target_depth_m: 0.45
+  lateral_tolerance_m: 0.08
+  depth_tolerance_m: 0.08
+  timeout_sec: 20.0
+  search_timeout_sec: 45.0
+  bridge_cross_sec: 4.0
+  door_enter_sec: 2.0

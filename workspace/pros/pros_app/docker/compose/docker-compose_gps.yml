@@ -24,7 +24,8 @@ services:
 # You can see the network by docker network ls
 networks:
   my_bridge_network:
-    driver: bridge
+    external: true
+    name: compose_my_bridge_network
 
 # If GPS is not working, refer to the usage instructions at:
 # https://github.com/screamlab/pros_gps

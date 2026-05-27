@@ -4,7 +4,8 @@
 
 
 ## SLAM launch
-python3 ./workspace/pros/pros_app/control.py -s  
+python3 ./workspace/pros/pros_app/control.py -s
+
 
 ## Car control
  ./workspace/pros/pros_car/car_control.sh     

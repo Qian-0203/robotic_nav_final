@@ -49,8 +49,9 @@ class NavigationController:
 
     def customize_nav(self):
         result = self.check_prerequisites()
-        coordinate = self.car_control_node.get_latest_object_coordinates()
-        if coordinate == {} or not coordinate:
+        label = self.car_control_node.get_object_nav_label()
+        coordinate = self.car_control_node.get_latest_object_coordinates(label=label)
+        if not coordinate:
             if self.nav_end_flag == 0:
                 self.signal = self.manual_nav()
             else:
@@ -61,8 +62,8 @@ class NavigationController:
             # self.car_control_node.publish_control("STOP")                
         else:
             self.nav_end_flag = 0
-            y_offset = coordinate["ball"][1]
-            object_depth = coordinate["ball"][0]
+            y_offset = coordinate[1]
+            object_depth = coordinate[0]
             if object_depth < 0.3:
                 for i in range(10):
                     self.car_control_node.publish_control("STOP")

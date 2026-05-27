@@ -79,11 +79,7 @@ class BaseActionClient:
             self._get_result_future = None
 
     def start_next_action(self):
-        # 假設你有下一個 client：self.other_action_client
-        if self.other_action_client.is_server_ready():
-            self.other_action_client.send_goal(mode="some_mode")
-        else:
-            self._logger.error("Next action server not ready!")
+        self._logger.debug("No follow-up action configured.")
 
     def feedback_callback(self, feedback_msg):
         pass

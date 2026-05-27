@@ -145,7 +145,10 @@ class ImageProcessor:
         return self.bridge.cv2_to_compressed_imgmsg(img)
 
     def get_yolo_target_label(self):
-        return self.ros_communicator.get_latest_data("target_label")
+        msg = self.ros_communicator.get_latest_data("target_label")
+        if msg is None:
+            return None
+        return msg.data
 
     def get_rgb_ros_image(self, img):
         ros_img = self._convert_image_from_cv_to_ros(img)

@@ -15,13 +15,6 @@ class ModeManager:
                 else:
                     # 發送導航目標
                     self.ros_manager.car_action_client.send_navigation_goal(mode=title)
-                    self.ros_manager.arm_action_client.send_arm_mode(mode="catch")
-
-
-                    # 設置後續動作，當導航完成時會調用這個 lambda
-                    # self.ros_manager.car_action_client.start_next_action(next_action)
-
-                    print("end")
             else:
                 self.ros_manager.publish_car_signal(car_control_signal)
 
@@ -35,6 +28,9 @@ class ModeManager:
                 or title == "catch2"
                 or title == "wave"
                 or title == "object_follow"
+                or title == "pickup_bear"
+                or title == "place_bear"
+                or title == "open_knob"
                 or title == "init_pose"
                 or title == "up"
                 or title == "down"
