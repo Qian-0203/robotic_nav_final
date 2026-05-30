@@ -17,9 +17,9 @@ from std_msgs.msg import Float32MultiArray, String
 
 
 ACTION_MAPPINGS = {
-    "FORWARD_SLOW": [3.0, 3.0, 3.0, 3.0],
-    "COUNTERCLOCKWISE_ROTATION_SLOW": [-2.0, 2.0, -2.0, 2.0],
-    "CLOCKWISE_ROTATION_SLOW": [2.0, -2.0, 2.0, -2.0],
+    "FORWARD_SLOW": [150.0, 150.0, 150.0, 150.0],
+    "COUNTERCLOCKWISE_ROTATION_SLOW": [-250.0, 250.0, -250.0, 250.0],
+    "CLOCKWISE_ROTATION_SLOW": [250.0, -250.0, 250.0, -250.0],
     "STOP": [0.0, 0.0, 0.0, 0.0],
 }
 
@@ -30,6 +30,9 @@ class MissionTaskNode(Node):
         self.declare_parameter("waypoints_file", "")
         self.config = self._load_config()
 
+        self.initial_pose_pub = self.create_publisher(
+            PoseWithCovarianceStamped, "/initialpose", 10
+        )
         self.goal_pose_pub = self.create_publisher(PoseStamped, "/goal_pose", 10)
         self.target_label_pub = self.create_publisher(String, "/target_label", 10)
         self.front_wheel_pub = self.create_publisher(
@@ -120,6 +123,7 @@ class MissionTaskNode(Node):
         return result
 
     def _run_task1_bear(self, goal_handle):
+        self._prepare_mission_start_pose()
         start_pose = self._capture_start_pose()
         self._go_to_target(goal_handle, "bear", "bear_approach", "find_bear")
         self._set_target_label("bear")
@@ -129,6 +133,7 @@ class MissionTaskNode(Node):
         self._send_arm_goal(goal_handle, "place_bear")
 
     def _run_task2_bridge(self, goal_handle):
+        self._prepare_mission_start_pose()
         start_pose = self._capture_start_pose()
         self._go_to_target(goal_handle, "bridge", "bridge_entry", "find_bridge")
         self._set_target_label("bridge")
@@ -143,6 +148,7 @@ class MissionTaskNode(Node):
         self._return_to_start(goal_handle, start_pose)
 
     def _run_task3_knob(self, goal_handle):
+        self._prepare_mission_start_pose()
         self._go_to_target(goal_handle, "knob", "knob_approach", "find_knob")
         self._set_target_label("knob")
         self._visual_servo(goal_handle, "knob", "align_knob_for_opening")
@@ -172,7 +178,9 @@ class MissionTaskNode(Node):
             self.get_logger().warn("No /amcl_pose captured; using configured start waypoint")
             self._navigate(goal_handle, "start")
             return
-        self.goal_pose_pub.publish(start_pose)
+        for _ in range(3):
+            self.goal_pose_pub.publish(start_pose)
+            time.sleep(0.1)
         time.sleep(1.0)
         self._send_nav_goal(goal_handle, "Manual_Nav")
 
@@ -197,10 +205,74 @@ class MissionTaskNode(Node):
         msg.pose.position.y = float(waypoint["y"])
         msg.pose.position.z = float(waypoint.get("z", 0.0))
         msg.pose.orientation = self._quaternion_from_yaw(float(waypoint.get("yaw", 0.0)))
-        self.goal_pose_pub.publish(msg)
+        for _ in range(3):
+            self.goal_pose_pub.publish(msg)
+            time.sleep(0.1)
         self.get_logger().info(
             f"Published waypoint {waypoint_name}: "
             f"({msg.pose.position.x:.2f}, {msg.pose.position.y:.2f})"
+        )
+
+    def _prepare_mission_start_pose(self):
+        initial_pose_cfg = self.config.get("initial_pose", {})
+        if not bool(initial_pose_cfg.get("publish", True)):
+            return
+
+        msg = PoseWithCovarianceStamped()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = initial_pose_cfg.get("frame_id", "map")
+        msg.pose.pose.position.x = float(initial_pose_cfg.get("x", 0.0))
+        msg.pose.pose.position.y = float(initial_pose_cfg.get("y", 0.0))
+        msg.pose.pose.position.z = float(initial_pose_cfg.get("z", 0.0))
+        msg.pose.pose.orientation = self._quaternion_from_yaw(
+            float(initial_pose_cfg.get("yaw", 0.0))
+        )
+        msg.pose.covariance = [
+            0.25,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.25,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            float(initial_pose_cfg.get("yaw_covariance", 0.0685)),
+        ]
+
+        for _ in range(3):
+            self.initial_pose_pub.publish(msg)
+            time.sleep(0.1)
+        time.sleep(float(initial_pose_cfg.get("settle_sec", 0.5)))
+        self.get_logger().info(
+            "Published initial pose: "
+            f"({msg.pose.pose.position.x:.2f}, {msg.pose.pose.position.y:.2f})"
         )
 
     def _set_target_label(self, label):

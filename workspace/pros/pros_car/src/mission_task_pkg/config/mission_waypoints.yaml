@@ -1,6 +1,18 @@
-# If use_waypoints is false, missions use YOLO search/servo for targets and
-# capture the current /amcl_pose as the start pose for return-home behavior.
-use_waypoints: false
+# If use_waypoints is true, missions first publish /goal_pose and run Manual_Nav,
+# matching the manual navigation smoke test before YOLO servo takes over.
+# Set false to use YOLO search/servo without a fixed navigation waypoint.
+use_waypoints: true
+
+# Published at mission start, matching the manual navigation smoke test.
+initial_pose:
+  publish: true
+  x: 0.0
+  y: 0.0
+  z: 0.0
+  yaw: 0.0
+  frame_id: map
+  yaw_covariance: 0.0685
+  settle_sec: 0.5
 
 # Optional fallback poses. Enable use_waypoints only after tuning these in Unity.
 waypoints:
@@ -10,7 +22,7 @@ waypoints:
     yaw: 0.0
     frame_id: map
   bear_approach:
-    x: 1.0
+    x: 0.8
     y: 0.0
     yaw: 0.0
     frame_id: map

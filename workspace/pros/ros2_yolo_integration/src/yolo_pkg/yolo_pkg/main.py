@@ -1,4 +1,5 @@
 import rclpy
+import time
 from rclpy.executors import MultiThreadedExecutor
 from yolo_pkg.ros_communicator import RosCommunicator
 from yolo_pkg.image_processor import ImageProcessor
@@ -11,11 +12,11 @@ from std_msgs.msg import String  # Import String message type
 from yolo_pkg.load_params import LoadParams
 
 
-def _init_ros_node():
+def _init_ros_node(args=None):
     """
     Initialize the ROS 2 node with MultiThreadedExecutor for efficient handling of multiple subscribers.
     """
-    rclpy.init()
+    rclpy.init(args=args)
     node = RosCommunicator()  # Initialize the ROS node
     executor = MultiThreadedExecutor()  # Use MultiThreadedExecutor
     executor.add_node(node)  # Add the node to the executor
@@ -38,12 +39,13 @@ def menu():
     return user_input
 
 
-def main():
+def main(args=None):
     """
     Main function to initialize the node and run the bounding box visualizer.
     """
     load_params = LoadParams("yolo_pkg")
-    ros_communicator, executor, ros_thread = _init_ros_node()
+    ros_communicator, executor, ros_thread = _init_ros_node(args=args)
+    ros_communicator.declare_parameter("mode", "1")
     image_processor = ImageProcessor(ros_communicator, load_params)
     yolo_boundingbox = YoloBoundingBox(image_processor, load_params)
     yolo_depth_extractor = YoloDepthExtractor(
@@ -54,10 +56,35 @@ def main():
     )
     camera_geometry = CameraGeometry(yolo_depth_extractor)
 
-    user_input = menu()
+    configured_mode = str(ros_communicator.get_parameter("mode").value)
+    user_input = menu() if configured_mode == "interactive" else configured_mode
+    ros_communicator.get_logger().info(f"YOLO detection mode: {user_input}")
+    loop_rate = ros_communicator.create_rate(10)
+    last_wait_log = 0.0
 
     try:
         while True:
+            has_rgb = ros_communicator.get_latest_data("rgb_compress") is not None
+            has_depth = (
+                ros_communicator.get_latest_data("depth_image") is not None
+                or ros_communicator.get_latest_data("depth_image_compress") is not None
+            )
+            needs_depth = user_input == "1"
+            if not has_rgb or (needs_depth and not has_depth):
+                now = time.monotonic()
+                if now - last_wait_log > 5.0:
+                    missing = []
+                    if not has_rgb:
+                        missing.append("rgb image")
+                    if needs_depth and not has_depth:
+                        missing.append("depth image")
+                    ros_communicator.get_logger().warn(
+                        "Waiting for " + " and ".join(missing)
+                    )
+                    last_wait_log = now
+                loop_rate.sleep()
+                continue
+
             if user_input == "1":
                 offsets_3d = camera_geometry.calculate_offset_from_crosshair_2d()
                 boundingbox_visualizer.draw_bounding_boxes(
@@ -103,13 +130,15 @@ def main():
             # Example action for yolo_depth_extractor (can be removed if not needed)
             # depth_data = yolo_depth_extractor.get_yolo_object_depth()
             # print(f"Object Depth: {depth_data}")
+            loop_rate.sleep()
 
     except KeyboardInterrupt:
         print("Shutting down gracefully...")
     finally:
         # Shut down the executor and ROS
         executor.shutdown()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
         ros_thread.join()
 
 

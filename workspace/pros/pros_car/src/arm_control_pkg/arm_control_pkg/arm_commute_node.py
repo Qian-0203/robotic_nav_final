@@ -99,6 +99,21 @@ class ArmCummuteNode(Node):
         self.amcl_sub = self.create_subscription(
             PoseWithCovarianceStamped, "/amcl_pose", self._amcl_callback, 10
         )
+        self._startup_initial_pose_publish_count = 0
+        self._startup_initial_pose_publish_max = 5
+        self._startup_initial_pose_timer = self.create_timer(
+            0.2, self._publish_startup_initial_pose
+        )
+
+    def _publish_startup_initial_pose(self):
+        self.publish_arm_angle()
+        self._startup_initial_pose_publish_count += 1
+        if (
+            self._startup_initial_pose_publish_count
+            >= self._startup_initial_pose_publish_max
+        ):
+            self._startup_initial_pose_timer.cancel()
+            self.get_logger().info("Published startup initial arm pose")
 
     def clear_arucode_topic(self):
         msg = Float32()
@@ -305,4 +320,6 @@ class ArmCummuteNode(Node):
         msg.time_from_start.sec = 0
         msg.time_from_start.nanosec = 0
         self.arm_pub.publish(msg)
-        # self.get_logger().info(f"Published angles in radians: {radian_positions}")
+        self.get_logger().info(
+            f"Published arm angles degrees={joint_positions}, radians={radian_positions}"
+        )

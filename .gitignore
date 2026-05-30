@@ -28,6 +28,7 @@ devel/
 
 # Local Unity build/workspace
 workspace/pros/pros_twin_unity_linux_V3/
+workspace/pros/pros_twin_unity_linux_V4.1/
 
 # Runtime logs and temporary files
 *.log

@@ -49,18 +49,26 @@ class LoadParams:
     def get_confidence_threshold(self):
         return self.get_yolo_params().get("conf", 0.6)
 
+    def get_model_package(self):
+        return self.get_yolo_params().get("model_package", self.package_name)
+
     def get_use_compressed(self):
         return self.get_image_params().get("use_compressed", True)
 
     def get_screenshot_fps(self):
         return self.get_image_params().get("screenshot_fps", 5)
 
+    def get_device(self):
+        return self.get_yolo_params().get("device", "auto")
+
     def get_detection_model(self):
         if self._yolo_detection_model is None:
             model_name = self.get_yolo_params().get("obb_model", "yolov8n.pt")
 
             model_path = os.path.join(
-                get_package_share_directory(self.package_name), "models", model_name
+                get_package_share_directory(self.get_model_package()),
+                "models",
+                model_name,
             )
             print()
             print("*" * 10)
@@ -68,11 +76,15 @@ class LoadParams:
 
             model = YOLO(model_path)
 
-            if torch.cuda.is_available():
+            device = self.get_device()
+            if device == "auto":
+                device = "cuda" if torch.cuda.is_available() else "cpu"
+
+            if device == "cuda":
                 print("CUDA is available. Using GPU.")
                 model.to("cuda")
             else:
-                print("CUDA is not available. Using CPU.")
+                print("Using CPU.")
                 model.to("cpu")
             print("*" * 10)
 
@@ -85,7 +97,9 @@ class LoadParams:
             model_name = self.get_yolo_params().get("seg_model", "yolo11n-seg.pt")
 
             model_path = os.path.join(
-                get_package_share_directory(self.package_name), "models", model_name
+                get_package_share_directory(self.get_model_package()),
+                "models",
+                model_name,
             )
 
             print()
@@ -94,11 +108,15 @@ class LoadParams:
 
             model = YOLO(model_path)
 
-            if torch.cuda.is_available():
+            device = self.get_device()
+            if device == "auto":
+                device = "cuda" if torch.cuda.is_available() else "cpu"
+
+            if device == "cuda":
                 print("CUDA is available. Using GPU.")
                 model.to("cuda")
             else:
-                print("CUDA is not available. Using CPU.")
+                print("Using CPU.")
                 model.to("cpu")
             print("*" * 10)
 

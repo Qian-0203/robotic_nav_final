@@ -14,29 +14,24 @@ class ArmAngleControl:
         return self.joint_positions
 
     def arm_init(self):
-        """Initialize arm joints to reset positions"""
-        joints_count = int(self.arm_params["global"]["joints_count"])
-        self.joint_positions = []
-
-        for i in range(joints_count):
-            try:
-                pos = float(self.arm_params["joints_reset"][i])
-            except (KeyError, ValueError, TypeError):
-                pos = 90.0
-                self._node.get_logger().warn(
-                    f"Joint {i} has invalid or missing reset_position. Using default 90.0."
-                )
-            self.joint_positions.append(pos)
+        """Initialize arm joints to the configured initial pose."""
+        self.joint_positions = self._read_pose("initial")
 
         print(f"Initialized arm with positions: {self.joint_positions}")
 
     def arm_default_change(self):
-        """Change a joint angle to its default position"""
-        # Get the total number of joints from config
-        joints_reset = self.arm_params["joints_reset"]
-        for index in range(len(self.joint_positions)):
-            self.joint_positions[index] = float(joints_reset[index])
+        """Change all joints to the configured initial pose."""
+        self.joint_positions = self._read_pose("initial")
         return self.joint_positions
+
+    def arm_pose_change(self, pose_name):
+        """Change all joints to a named pose from config."""
+        self.joint_positions = self.validate_joint_limits(self._read_pose(pose_name))
+        return self.joint_positions
+
+    def arm_grasp_change(self):
+        """Change all joints to the configured grasp pose."""
+        return self.arm_pose_change("grasp")
 
     def arm_index_change(self, index, angle):
         """Just change a joint angle to a specified value"""
@@ -86,3 +81,25 @@ class ArmAngleControl:
         # Return the validated positions
         # print(f"Final validated positions: {positions}")
         return positions
+
+    def _read_pose(self, pose_name):
+        joints_count = int(self.arm_params["global"]["joints_count"])
+        poses = self.arm_params.get("poses", {})
+        pose = poses.get(pose_name)
+
+        if pose is None and pose_name == "initial":
+            pose = self.arm_params.get("joints_reset", {})
+
+        positions = []
+        for i in range(joints_count):
+            try:
+                pos = float(pose[i])
+            except (KeyError, ValueError, TypeError):
+                pos = 90.0
+                print(
+                    f"Joint {i} has invalid or missing {pose_name} pose. "
+                    "Using default 90.0."
+                )
+            positions.append(pos)
+
+        return self.validate_joint_limits(positions)

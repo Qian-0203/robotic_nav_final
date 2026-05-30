@@ -3,16 +3,30 @@
 ### Usage
 1. Run the provided activation script to start the container and prepare the environment
 ```
-./yolo_activate.sh
+./yolo_activate.sh --task yolo_mode:=1 enable_arucode:=false
 ```
-2. Do colcon build and source ./install/setup.bash
-```
-r
-```
-3. Run yolo node
-```
-ros2 run yolo_pkg yolo_detection_node
-```
+
+The activation script builds the ROS 2 workspace in the container and launches
+`yolo_pkg yolo_detection_node`.
+
+### Current project configuration
+- RGB input topic: `/camera/image/compressed`
+- Depth input topics: `/camera/depth/compressed` and `/camera/depth/image_raw`
+- Detection output topic: `/yolo/detection/compressed`
+- Object offset output topic: `/yolo/object/offset`
+- Bear and knob detection model:
+  `src/yolo_example_pkg/models/detection.pt`
+- Bridge segmentation model:
+  `src/yolo_example_pkg/models/segmentation.pt`
+- Model config:
+  `src/yolo_pkg/config/yolo_params.yaml`
+
+`yolo_pkg` loads these models through `model_package: "yolo_example_pkg"` in
+`yolo_params.yaml`. The config currently sets `device: "cpu"` because the
+project container's PyTorch build does not support the RTX 5060 CUDA
+architecture. When `device: "cpu"` is set, `yolo_activate.sh` skips the GPU
+attempt and starts one CPU container directly.
+
 ### Mode
 The YOLO node can operate in different modes depending on your use case:
 - Mode 1: Draw bounding boxes without screenshot

@@ -115,20 +115,49 @@ class ArmAutoController:
     def catch(self, label=None, should_cancel=lambda: False):
         if label is None:
             label = self.arm_commute_node.get_object_label()
-        while self.depth > 0.4:
+
+        data = None
+        detection_deadline = time.monotonic() + 5.0
+        while time.monotonic() < detection_deadline:
             if should_cancel():
                 return ArmGoal.Result(success=False, message="Canceled by user")
-            print(self.depth)
-            try:
-                self.depth = self.arm_commute_node.get_latest_object_coordinates(label=label)[0]
-            except:
-                time.sleep(0.1)
-                continue
-        while 1:
-            if should_cancel():
-                return ArmGoal.Result(success=False, message="Canceled by user")
-            if self.follow_obj(label=label)  == True:
+            data = self.arm_commute_node.get_latest_object_coordinates(label=label)
+            if data and len(data) >= 3:
+                depth, obj_y, obj_z = data
+                self.depth = depth
+                self.arm_commute_node.get_logger().info(
+                    f"[catch] detected {label}: depth={depth:.3f}, y={obj_y:.3f}, z={obj_z:.3f}"
+                )
                 break
+            self.arm_commute_node.get_logger().info(
+                f"[catch] waiting for {label} detection"
+            )
+            time.sleep(0.1)
+
+        if not data or len(data) < 3:
+            return ArmGoal.Result(success=False, message=f"No {label} detected")
+
+        if self.depth > 0.4:
+            self.arm_commute_node.get_logger().info(
+                f"[catch] depth {self.depth:.3f} is still > 0.400; continuing with arm alignment"
+            )
+
+        follow_deadline = time.monotonic() + 10.0
+        while time.monotonic() < follow_deadline:
+            if should_cancel():
+                return ArmGoal.Result(success=False, message="Canceled by user")
+            follow_result = self.follow_obj(label=label)
+            if follow_result is True:
+                break
+            if isinstance(follow_result, ArmGoal.Result) and not follow_result.success:
+                self.arm_commute_node.get_logger().info(
+                    f"[catch] follow_obj waiting: {follow_result.message}"
+                )
+            time.sleep(0.1)
+        else:
+            return ArmGoal.Result(
+                success=False, message=f"Timed out aligning arm to {label}"
+            )
 
         # reset depth
         self.depth = 100.0
@@ -136,7 +165,14 @@ class ArmAutoController:
         #     distance=0.4,z_offset = 0.05
         # )
         data = self.arm_commute_node.get_latest_object_coordinates(label=label)
+        if not data or len(data) < 3:
+            return ArmGoal.Result(
+                success=False, message=f"Lost {label} detection before grasp"
+            )
         depth = data[0]
+        self.arm_commute_node.get_logger().info(
+            f"[catch] final grasp approach for {label}: depth={depth:.3f}, y={data[1]:.3f}, z={data[2]:.3f}"
+        )
         obj_pos = self.pybullet_robot_controller.markPointInFrontOfEndEffector(
             distance=depth + 0.05,z_offset=0.15
         )
@@ -284,13 +320,15 @@ class ArmAutoController:
             return []  # Or raise an error
 
     def grap(self):
-        self.arm_agnle_control.arm_index_change(4, 10.0)
+        grasp_angle = self.arm_params.get("poses", {}).get("grasp", {}).get(4, 10.0)
+        self.arm_agnle_control.arm_index_change(4, float(grasp_angle))
         self.arm_commute_node.publish_arm_angle()
 
     def init_pose(self, grap=False):
         angle = self.arm_agnle_control.arm_default_change()
         if grap:
-            self.arm_agnle_control.arm_index_change(4, 10.0)
+            grasp_angle = self.arm_params.get("poses", {}).get("grasp", {}).get(4, 10.0)
+            self.arm_agnle_control.arm_index_change(4, float(grasp_angle))
             self.arm_commute_node.publish_arm_angle()
             time.sleep(1.0)
         self.arm_commute_node.publish_arm_angle()

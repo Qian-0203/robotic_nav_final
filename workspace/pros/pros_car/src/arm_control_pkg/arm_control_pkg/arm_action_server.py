@@ -40,6 +40,7 @@ class ArmActionServer(Node):
         arm_auto_method = self._select_arm_auto_method(mode, should_cancel)
         if arm_auto_method is None:
             self.get_logger().error(f"Unknown mode: {mode}")
+            goal_handle.abort()
             result.success = False
             result.message = f"Unknown mode: {mode}"
             return result

@@ -1,5 +1,6 @@
 import contextlib
 import io
+import cv2
 
 
 class YoloBoundingBox:
@@ -70,6 +71,7 @@ class YoloBoundingBox:
         if self.image is None:
             print("Error: No image received from image_processor")
             return []
+        image_height, image_width = self.image.shape[:2]
 
         segmentation_results = self._yolo_segmentation_filter(self.image)
 
@@ -103,7 +105,12 @@ class YoloBoundingBox:
                         "label": class_name,
                         "confidence": float(conf),
                         "box": tuple(map(int, box)),
-                        "mask": masks_np[i],
+                        "mask": cv2.resize(
+                            masks_np[i],
+                            (image_width, image_height),
+                            interpolation=cv2.INTER_LINEAR,
+                        )
+                        > 0.5,
                     }
                 )
 
@@ -112,12 +119,16 @@ class YoloBoundingBox:
 
     def _yolo_msg_filter(self, img):
         with contextlib.redirect_stdout(io.StringIO()):
-            results = self.yolo_model(img, verbose=False)
+            results = self.yolo_model(
+                img, conf=self.get_confidence_threshold(), verbose=False
+            )
         return results
 
     def _yolo_segmentation_filter(self, img):
         with contextlib.redirect_stdout(io.StringIO()):
-            results = self.yolo_segmentation_model(img, verbose=False)
+            results = self.yolo_segmentation_model(
+                img, conf=self.get_confidence_threshold(), verbose=False
+            )
         return results
 
     def get_target_label(self):

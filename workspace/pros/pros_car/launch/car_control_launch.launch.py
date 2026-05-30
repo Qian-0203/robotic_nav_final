@@ -7,11 +7,10 @@ from launch_ros.actions import Node
 def generate_launch_description():
     return LaunchDescription(
         [
-            # 啟動 car_manual_node（非互動節點）
             Node(
                 package="car_control_pkg",
-                executable="car_manual_node",
-                name="car_manual_node",
+                executable="car_control_node",
+                name="car_control_node",
                 output="screen",
             ),
         ]

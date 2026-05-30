@@ -1,12 +1,14 @@
 import numpy as np
 from yolo_pkg.camera_parameters import CameraParameters
 import json  # Import the json module
+import time
 
 
 class CameraGeometry:
     def __init__(self, yolo_depth_extractor):
         self.camera_intrinsics = CameraParameters().get_camera_intrinsics()
         self.yolo_depth_extractor = yolo_depth_extractor
+        self._last_no_object_log = 0.0
 
     def calculate_3d_position(self):
         """
@@ -86,7 +88,10 @@ class CameraGeometry:
         results = []  # Initialize results as a list
 
         if not yolo_objects:
-            print("No YOLO objects detected or depth data unavailable.")
+            now = time.monotonic()
+            if now - self._last_no_object_log > 5.0:
+                print("No YOLO objects detected or depth data unavailable.")
+                self._last_no_object_log = now
             # Return an empty list as a JSON string
             return json.dumps(results)
 

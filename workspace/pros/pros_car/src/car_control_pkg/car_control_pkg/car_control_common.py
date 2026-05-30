@@ -135,9 +135,15 @@ class BaseCarControlNode(Node):
         self.goal_pose_sub = self.create_subscription(
             PoseStamped, "/goal_pose", self._goal_pose_callback, 10
         )
+        self.move_base_simple_goal_sub = self.create_subscription(
+            PoseStamped, "/move_base_simple/goal", self._goal_pose_callback, 10
+        )
 
-        self.plan_sub = self.create_subscription(
+        self.received_global_plan_sub = self.create_subscription(
             Path, "/received_global_plan", self._global_plan_callback, 1
+        )
+        self.nav2_plan_sub = self.create_subscription(
+            Path, "/plan", self._global_plan_callback, 1
         )
 
         self.cmd_vel_sub = self.create_subscription(
@@ -163,7 +169,15 @@ class BaseCarControlNode(Node):
         self.latest_amcl_pose = msg
 
     def _goal_pose_callback(self, msg):
-        """Store latest AMCL pose"""
+        """Store latest navigation goal pose."""
+        if (
+            msg.header.frame_id == ""
+            and msg.pose.position.x == 0.0
+            and msg.pose.position.y == 0.0
+            and msg.pose.position.z == 0.0
+        ):
+            self.latest_goal_pose = None
+            return
         self.latest_goal_pose = msg
 
     def _global_plan_callback(self, msg):
@@ -274,6 +288,7 @@ class BaseCarControlNode(Node):
         speed_msg = Float32MultiArray()
         speed_msg.data = [v_left, v_right]
         self.latest_cmd_vel = [v_left, v_right]
+        self.publish_control([v_left, v_right])
 
     def get_cmd_vel_data(self):
         return self.latest_cmd_vel

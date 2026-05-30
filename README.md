@@ -22,18 +22,21 @@ and YOLO integration.
 
 ## Quick Start
 
-For the Humble workspace on `main`, start with:
+For staged mission bringup, start with:
 
 ```bash
-cd workspace/pros/pros_app
-./control.sh
+cd workspace/pros/pros_car
+./car_control.sh --task stage:=car      # car control only
+./car_control.sh --task stage:=arm      # arm control only
+./car_control.sh --task stage:=control  # car + arm
+./car_control.sh --task stage:=mission  # car + arm + mission server
 ```
 
-For Jazzy migration work, switch to the migration branch and read the branch
-README:
+Run YOLO perception in its workspace:
 
 ```bash
-git checkout ros2-jazzy-migration
+cd workspace/pros/ros2_yolo_integration
+./yolo_activate.sh --task yolo_mode:=1 enable_arucode:=false
 ```
 
-Detailed launch notes are in `workspace/pros/pros_app/README.md`.
+Detailed workflow notes are in `docs/yolo_servo_workflow.md`.

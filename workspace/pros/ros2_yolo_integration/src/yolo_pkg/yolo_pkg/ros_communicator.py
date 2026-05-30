@@ -11,7 +11,7 @@ class RosCommunicator(Node):
         # --- Subscriber and Publisher Initialization ---
         self.subscriber_dict = {
             "rgb_compress": {
-                "topic": "/out/compressed",
+                "topic": "/camera/image/compressed",
                 "msg_type": CompressedImage,
                 "callback": self._image_sub_callback,
             },
