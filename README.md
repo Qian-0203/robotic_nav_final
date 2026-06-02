@@ -22,13 +22,10 @@ and YOLO integration.
 
 ## Quick Start
 
-For staged mission bringup, start with:
+Start the mission control stack with:
 
 ```bash
 cd workspace/pros/pros_car
-./car_control.sh --task stage:=car      # car control only
-./car_control.sh --task stage:=arm      # arm control only
-./car_control.sh --task stage:=control  # car + arm
 ./car_control.sh --task stage:=mission  # car + arm + mission server
 ```
 

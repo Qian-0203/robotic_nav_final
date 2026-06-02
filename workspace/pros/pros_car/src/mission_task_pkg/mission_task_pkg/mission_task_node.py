@@ -24,6 +24,13 @@ ACTION_MAPPINGS = {
 }
 
 
+def _is_nearer_offset(candidate, current):
+    """Return True when candidate has a smaller valid forward depth."""
+    if current is None:
+        return True
+    return candidate[0] > 0.0 and candidate[0] < current[0]
+
+
 class MissionTaskNode(Node):
     def __init__(self):
         super().__init__("mission_task_node")
@@ -294,9 +301,9 @@ class MissionTaskNode(Node):
     ):
         servo_cfg = self.config.get("visual_servo", {})
         target_depth = float(target_depth or servo_cfg.get("target_depth_m", 0.45))
-        lateral_tol = float(servo_cfg.get("lateral_tolerance_m", 0.08))
+        lateral_tol = float(servo_cfg.get("lateral_tolerance_m", 0.01))
         depth_tol = float(servo_cfg.get("depth_tolerance_m", 0.08))
-        timeout = float(timeout_sec or servo_cfg.get("timeout_sec", 20.0))
+        timeout = float(timeout_sec or servo_cfg.get("timeout_sec", 30.0))
 
         self._publish_phase(goal_handle, phase)
         start = time.monotonic()
@@ -413,7 +420,9 @@ class MissionTaskNode(Node):
                 label = item.get("label")
                 offset = item.get("offset_flu")
                 if label and isinstance(offset, list) and len(offset) == 3:
-                    coordinates[label] = [float(v) for v in offset]
+                    float_offset = [float(v) for v in offset]
+                    if _is_nearer_offset(float_offset, coordinates.get(label)):
+                        coordinates[label] = float_offset
             self.object_coordinates = coordinates
         except Exception as exc:
             self.get_logger().warn(f"Could not parse YOLO object offsets: {exc}")

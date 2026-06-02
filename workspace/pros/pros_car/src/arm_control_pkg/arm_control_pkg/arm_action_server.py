@@ -1,4 +1,3 @@
-import rclpy
 from rclpy.node import Node
 from rclpy.action import ActionServer, GoalResponse, CancelResponse
 from action_interface.action import ArmGoal
@@ -45,35 +44,38 @@ class ArmActionServer(Node):
             result.message = f"Unknown mode: {mode}"
             return result
 
-        rate = self.create_rate(10)
-        while rclpy.ok():
-            rate.sleep()
+        if goal_handle.is_cancel_requested:
+            self.get_logger().info("Arm action canceled by user")
+            result.success = False
+            result.message = "Arm action canceled"
+            goal_handle.canceled()
+            return result
 
-            # 處理取消請求
-            if goal_handle.is_cancel_requested:
-                self.get_logger().info("Navigation canceled by user")
-                result = ArmGoal.Result(success=False, message="Navigation canceled")
-                goal_handle.canceled()
-                break
+        arm_auto_result = arm_auto_method()
+        if not isinstance(arm_auto_result, ArmGoal.Result):
+            self.get_logger().error(
+                f"Arm mode {mode} finished without returning ArmGoal.Result"
+            )
+            goal_handle.abort()
+            result.success = False
+            result.message = f"Arm mode {mode} did not return a result"
+            return result
 
-            # 執行自動化方法
-            arm_auto_result = arm_auto_method()
-            if isinstance(arm_auto_result, ArmGoal.Result):
-                if arm_auto_result.success:
-                    self.get_logger().info(
-                        f"Arm action completed: {arm_auto_result.message}"
-                    )
-                    goal_handle.succeed()
-                else:
-                    self.get_logger().error(
-                        f"Arm action failed: {arm_auto_result.message}"
-                    )
-                    goal_handle.abort()
-                result = arm_auto_result
-                break
+        if arm_auto_result.success:
+            self.get_logger().info(
+                f"Arm action completed: {arm_auto_result.message}"
+            )
+            goal_handle.succeed()
+        elif goal_handle.is_cancel_requested:
+            self.get_logger().info("Arm action canceled by user")
+            goal_handle.canceled()
+        else:
+            self.get_logger().error(
+                f"Arm action failed: {arm_auto_result.message}"
+            )
+            goal_handle.abort()
 
-            # 發佈反饋
-            self._publish_feedback(goal_handle)
+        result = arm_auto_result
 
         return result
 

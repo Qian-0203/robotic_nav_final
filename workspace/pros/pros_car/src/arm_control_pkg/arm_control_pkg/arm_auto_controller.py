@@ -5,6 +5,12 @@ import math
 from typing import Tuple, List
 from arm_control_pkg.utils import get_yaw_from_quaternion, normalize_angle
 import random
+
+
+def _clamp(value, lower, upper):
+    return max(lower, min(value, upper))
+
+
 class ArmAutoController:
     def __init__(
         self, arm_params, arm_commute_node, pybulletRobotController, arm_agnle_control
@@ -77,7 +83,40 @@ class ArmAutoController:
         # self.arm_agnle_control.arm_all_change([])
 
     def pickup_bear(self, should_cancel=lambda: False):
-        return self.catch(label="bear", should_cancel=should_cancel)
+        if should_cancel():
+            return ArmGoal.Result(success=False, message="Canceled by user")
+
+        # The mission/chassis visual servo already aligns the bear. Keep the arm
+        # motion deterministic here instead of running follow_obj() side shifts.
+        grasp_pose = self.arm_params.get("poses", {}).get("grasp", {})
+        joints_count = int(self.arm_params["global"]["joints_count"])
+        gripper_open_angle = float(
+            self.arm_params["joints"][4].get("max_angle", 70.0)
+        )
+        pre_grasp_angles = []
+        for joint_idx in range(joints_count):
+            fallback_angle = self.arm_agnle_control.get_arm_angles()[joint_idx]
+            pre_grasp_angles.append(float(grasp_pose.get(joint_idx, fallback_angle)))
+        pre_grasp_angles[4] = gripper_open_angle
+
+        self.arm_agnle_control.arm_all_change(pre_grasp_angles)
+        self.arm_commute_node.publish_arm_angle()
+        time.sleep(0.8)
+        if should_cancel():
+            return ArmGoal.Result(success=False, message="Canceled by user")
+
+        grasp_angles = []
+        for joint_idx in range(joints_count):
+            fallback_angle = pre_grasp_angles[joint_idx]
+            grasp_angles.append(float(grasp_pose.get(joint_idx, fallback_angle)))
+
+        self.arm_agnle_control.arm_all_change(grasp_angles)
+        self.arm_commute_node.publish_arm_angle()
+        time.sleep(0.5)
+        if should_cancel():
+            return ArmGoal.Result(success=False, message="Canceled by user")
+
+        return ArmGoal.Result(success=True, message="bear picked up")
 
     def place_bear(self, should_cancel=lambda: False):
         if should_cancel():
@@ -146,7 +185,7 @@ class ArmAutoController:
         while time.monotonic() < follow_deadline:
             if should_cancel():
                 return ArmGoal.Result(success=False, message="Canceled by user")
-            follow_result = self.follow_obj(label=label)
+            follow_result = self.follow_obj(label=label, step=3)
             if follow_result is True:
                 break
             if isinstance(follow_result, ArmGoal.Result) and not follow_result.success:
@@ -186,9 +225,6 @@ class ArmAutoController:
         time.sleep(1.0)
         self.init_pose(grap=True)
         time.sleep(1.0)
-        self.seek_arucode()
-        time.sleep(0.5)
-        self.init_pose()
         # self.rotate_car()
         # self.rotate_wrist()
         # time.sleep(0.2)
@@ -345,6 +381,7 @@ class ArmAutoController:
     def look_up(self):
         self.arm_agnle_control.arm_index_change(2, 140)
         self.arm_commute_node.publish_arm_angle()
+        return ArmGoal.Result(success=True, message="success")
 
     def _is_at_target(
         self,
@@ -394,11 +431,10 @@ class ArmAutoController:
 
         # 3. 計算偏移
         depth_diff = current_depth - target_depth
-        x_offset = depth_diff * x_adjust_factor
-        y_offset = obj_y * y_adjust_factor
-        z_offset = obj_z * z_adjust_factor
+        x_offset = _clamp(depth_diff * x_adjust_factor, -0.05, 0.05)
+        y_offset = _clamp(obj_y * y_adjust_factor, -0.04, 0.04)
+        z_offset = _clamp(obj_z * z_adjust_factor, -0.04, 0.04)
 
-        # 4. 設定絕對深度（可選）
         target_pos = self.pybullet_robot_controller.offset_from_end_effector(
             x_offset=x_offset,
             y_offset=y_offset,
@@ -406,7 +442,8 @@ class ArmAutoController:
             visualize=True,
             mark_color=[0, 1, 0],
         )
-        target_pos[0] = 0.2  # 若要固定深度
+        if target_pos is None:
+            return ArmGoal.Result(success=False, message="Could not compute target")
 
         # 5. 生成與執行軌跡
         traj = self.pybullet_robot_controller.generateInterpolatedTrajectory(
@@ -428,9 +465,8 @@ class ArmAutoController:
                 ):
                     print("中途已達到目標位置，提早停止")
                     return True
-                    break
 
-        # return True
+        return ArmGoal.Result(success=False, message="Alignment update pending")
 
     def ik_move_func(self):
         # use ik move to obj position, but not excute

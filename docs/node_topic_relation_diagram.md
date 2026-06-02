@@ -193,7 +193,7 @@ flowchart LR
 
 - `workspace/pros/pros_car/src/mission_task_pkg/launch/task_bringup.launch.py`
   launches `car_control_node`, `arm_control_node`, `unity_arm_republish_node`, and
-  `mission_task_node` depending on stage.
+  `mission_task_node` for the mission stack.
 - `workspace/pros/ros2_yolo_integration/src/yolo_pkg/launch/yolo_and_arucode.launch.py`
   launches `yolo_detection_node` and optionally `arucode_node`.
 - `workspace/pros/pros_car/src/arm_control_pkg/launch/arm.launch.py` launches

@@ -2,6 +2,7 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="$SCRIPT_DIR/.env"
+CONTAINER_NAME="${PROS_CAR_CONTAINER_NAME:-pros_car}"
 
 # 1. 統一管理 -v 參數
 VOLUME_ARGS="-v $SCRIPT_DIR/src:/workspaces/src -v $SCRIPT_DIR/launch:/workspaces/launch -v $SCRIPT_DIR/task_bringup.sh:/workspaces/task_bringup.sh"
@@ -51,6 +52,7 @@ fi
 
 echo "Detected OS: $OS, Architecture: $ARCH"
 echo "GPU Flags: $GPU_FLAGS"
+echo "Container name: $CONTAINER_NAME"
 
 # 設定適當的 Docker 參數
 device_options=""
@@ -70,6 +72,7 @@ fi
 if [ "$ARCH" = "aarch64" ]; then
     echo "Detected architecture: arm64"
     docker run -it --rm \
+        --name "$CONTAINER_NAME" \
         --network compose_my_bridge_network \
         $PORT_MAPPING \
         $device_options \
@@ -86,6 +89,7 @@ elif [ "$ARCH" = "x86_64" ] || ([ "$ARCH" = "arm64" ] && [ "$OS" = "Darwin" ]); 
     if [ "$OS" = "Darwin" ]; then
         echo "Running Docker on macOS (without GPU support)..."
         docker run -it --rm \
+            --name "$CONTAINER_NAME" \
             --network compose_my_bridge_network \
             $PORT_MAPPING \
             $device_options \
@@ -96,6 +100,7 @@ elif [ "$ARCH" = "x86_64" ] || ([ "$ARCH" = "arm64" ] && [ "$OS" = "Darwin" ]); 
     else
         echo "Trying to run with GPU support..."
         docker run -it --rm \
+            --name "$CONTAINER_NAME" \
             --network compose_my_bridge_network \
             $PORT_MAPPING \
             $GPU_FLAGS \
@@ -109,6 +114,7 @@ elif [ "$ARCH" = "x86_64" ] || ([ "$ARCH" = "arm64" ] && [ "$OS" = "Darwin" ]); 
         if [ $? -ne 0 ]; then
             echo "GPU not supported or failed, falling back to CPU mode..."
             docker run -it --rm \
+                --name "$CONTAINER_NAME" \
                 --network compose_my_bridge_network \
                 $PORT_MAPPING \
                 --env-file "$ENV_FILE" \

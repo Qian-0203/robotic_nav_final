@@ -17,6 +17,13 @@ from visualization_msgs.msg import Marker
 # can increase or decrease a single joint angle
 
 
+def _is_nearer_offset(candidate, current):
+    """Return True when candidate has a smaller valid forward depth."""
+    if current is None:
+        return True
+    return candidate[0] > 0.0 and candidate[0] < current[0]
+
+
 class ArmCummuteNode(Node):
     def __init__(self, arm_params, arm_angle_control):
         super().__init__("arm_commute_node")
@@ -240,7 +247,10 @@ class ArmCummuteNode(Node):
                     if isinstance(coordinates, list) and len(coordinates) == 3:
                         try:
                             float_coords = [float(c) for c in coordinates]
-                            new_coordinates[label] = float_coords
+                            if _is_nearer_offset(
+                                float_coords, new_coordinates.get(label)
+                            ):
+                                new_coordinates[label] = float_coords
                         except (ValueError, TypeError):
                             self.get_logger().warn(
                                 f"Invalid coordinate format for label '{label}': {coordinates}"

@@ -9,6 +9,13 @@ from car_control_pkg.nav2_utils import cal_distance
 import json
 
 
+def _is_nearer_offset(candidate, current):
+    """Return True when candidate has a smaller valid forward depth."""
+    if current is None:
+        return True
+    return candidate[0] > 0.0 and candidate[0] < current[0]
+
+
 class CarControlPublishers:
     """Class to manage common car control publishers and methods"""
 
@@ -206,7 +213,10 @@ class BaseCarControlNode(Node):
                     if isinstance(coordinates, list) and len(coordinates) == 3:
                         try:
                             float_coords = [float(c) for c in coordinates]
-                            new_coordinates[label] = float_coords
+                            if _is_nearer_offset(
+                                float_coords, new_coordinates.get(label)
+                            ):
+                                new_coordinates[label] = float_coords
                         except (ValueError, TypeError):
                             self.get_logger().warn(
                                 f"Invalid coordinate format for label '{label}': {coordinates}"

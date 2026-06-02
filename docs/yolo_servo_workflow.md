@@ -7,31 +7,22 @@ This project is split into two ROS 2 workspaces:
 
 Both workspaces run on the shared Docker network `compose_my_bridge_network`.
 
-## Stage Order
+## Startup Order
 
-1. Car control
+1. Mission control stack
    - Starts `car_control_pkg/car_control_node`.
    - Provides `nav_action_server`.
-   - Publishes wheel commands on `car_C_front_wheel` and `car_C_rear_wheel`.
-
-2. Arm control
    - Starts `arm_control_pkg/arm_control_node`.
    - Provides `arm_action_server`.
-   - Optionally starts `unity_arm_republish_node`.
+   - Starts `unity_arm_republish_node` by default.
+   - Starts `mission_task_pkg/mission_task_node`.
+   - The mission node coordinates navigation, visual servoing, and arm actions.
+   - Supported tasks: `task1_bear`, `task2_bridge`, `task3_knob`.
 
-3. Control stack
-   - Starts car and arm nodes together.
-   - Use this stage to verify manual control and action servers before mission logic.
-
-4. Visual detection
+2. Visual detection
    - Starts `yolo_pkg/yolo_detection_node`.
    - Mode `1` publishes object offsets on `/yolo/object/offset` for visual servoing.
    - The node waits for RGB and depth topics instead of prompting for terminal input.
-
-5. Mission orchestration
-   - Starts car, arm, and `mission_task_pkg/mission_task_node`.
-   - The mission node coordinates navigation, visual servoing, and arm actions.
-   - Supported tasks: `task1_bear`, `task2_bridge`, `task3_knob`.
 
 ## Container Commands
 
@@ -45,28 +36,7 @@ cd workspace/pros/pros_app
 This script also starts rosbridge on port `9090` and Foxglove bridge on port
 `8765`. Do not start `rosbridge_server.sh` at the same time.
 
-Car-only stage:
-
-```bash
-cd workspace/pros/pros_car
-./car_control.sh --task stage:=car
-```
-
-Arm-only stage:
-
-```bash
-cd workspace/pros/pros_car
-./car_control.sh --task stage:=arm
-```
-
-Car and arm together:
-
-```bash
-cd workspace/pros/pros_car
-./car_control.sh --task stage:=control
-```
-
-Full mission control stack:
+Mission control stack:
 
 ```bash
 cd workspace/pros/pros_car
@@ -118,10 +88,8 @@ ros2 action send_goal /nav_action_server action_interface/action/NavGoal "{mode:
 
 `mission_task_pkg task_bringup.launch.py`:
 
-- `stage:=car`: car node only.
-- `stage:=arm`: arm node and Unity arm bridge.
-- `stage:=control`: car plus arm.
-- `stage:=mission`: car plus arm plus mission action server.
+- `stage:=mission`: car plus arm plus mission action server. This is the only
+  supported stage.
 - `enable_unity_arm_bridge:=true|false`: controls `unity_arm_republish_node`.
 - `waypoints_file:=/path/to/mission_waypoints.yaml`: overrides mission waypoints.
 
@@ -155,7 +123,8 @@ Container smoke tests completed:
 
 - `pros_car`: `colcon build --symlink-install` completed for 9 packages.
 - `ros2_yolo_integration`: `colcon build --symlink-install` completed for 4 packages.
-- `mission_task_pkg task_bringup.launch.py stage:=car` started `car_control_node`.
+- `mission_task_pkg task_bringup.launch.py stage:=mission` started the car,
+  arm, Unity arm bridge, and mission nodes.
 - `yolo_pkg yolo_and_arucode.launch.py yolo_mode:=1 enable_arucode:=false` started `yolo_detection_node` and waited for RGB/depth topics.
 - Manual navigation test computed a Nav2 path with 18 poses and published
   `[10.0, 10.0]` on both car wheel command topics.
