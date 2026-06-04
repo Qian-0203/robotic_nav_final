@@ -53,11 +53,13 @@ visual_servo:
   depth_tolerance_m: 0.08
   timeout_sec: 20.0
   search_timeout_sec: 45.0
-  bear_explore_turn_sec: 7.5
+  bear_explore_turn_sec: 15.0
   bear_explore_turn_rad: 1.5708
   bear_explore_yaw_tolerance_rad: 0.08
-  bear_explore_timeout_sec: 15.0
-  bear_explore_settle_sec: 1.0
+  bear_explore_timeout_sec: 25.0
+  bear_explore_settle_sec: 2.0
+  bear_candidate_cluster_radius_m: 0.15
+  bear_candidate_min_observations: 3
   bear_candidate_min_confidence: 0.8
   bear_candidate_confidence_weight: 1.0
   bear_candidate_distance_weight: 0.5

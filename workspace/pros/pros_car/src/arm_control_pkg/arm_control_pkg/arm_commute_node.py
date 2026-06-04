@@ -107,7 +107,9 @@ class ArmCummuteNode(Node):
             PoseWithCovarianceStamped, "/amcl_pose", self._amcl_callback, 10
         )
         self._startup_initial_pose_publish_count = 0
-        self._startup_initial_pose_publish_max = 5
+        self._startup_initial_pose_publish_max = 30
+        self._startup_initial_pose_publish_min_after_subscriber = 5
+        self._startup_initial_pose_publish_with_subscriber = 0
         self._startup_initial_pose_timer = self.create_timer(
             0.2, self._publish_startup_initial_pose
         )
@@ -115,12 +117,25 @@ class ArmCummuteNode(Node):
     def _publish_startup_initial_pose(self):
         self.publish_arm_angle()
         self._startup_initial_pose_publish_count += 1
+        subscriber_count = self.arm_pub.get_subscription_count()
+        if subscriber_count > 0:
+            self._startup_initial_pose_publish_with_subscriber += 1
         if (
-            self._startup_initial_pose_publish_count
+            self._startup_initial_pose_publish_with_subscriber
+            >= self._startup_initial_pose_publish_min_after_subscriber
+            or self._startup_initial_pose_publish_count
             >= self._startup_initial_pose_publish_max
         ):
             self._startup_initial_pose_timer.cancel()
-            self.get_logger().info("Published startup initial arm pose")
+            if subscriber_count == 0:
+                self.get_logger().warn(
+                    "Published startup initial arm pose without /robot_arm subscribers"
+                )
+            else:
+                self.get_logger().info(
+                    "Published startup initial arm pose "
+                    f"with /robot_arm subscribers={subscriber_count}"
+                )
 
     def clear_arucode_topic(self):
         msg = Float32()

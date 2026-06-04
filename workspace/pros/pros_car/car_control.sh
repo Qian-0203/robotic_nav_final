@@ -78,8 +78,7 @@ if [ "$ARCH" = "aarch64" ]; then
         $device_options \
         --runtime=nvidia \
         --env-file "$ENV_FILE" \
-        -v "$SCRIPT_DIR/src:/workspaces/src" \
-        -v "$SCRIPT_DIR/task_bringup.sh:/workspaces/task_bringup.sh" \
+        $VOLUME_ARGS \
         ghcr.io/screamlab/pros_car_docker_image:latest \
         $CONTAINER_CMD "$@"
 
