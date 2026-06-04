@@ -7,6 +7,7 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
     enable_unity_arm_bridge = LaunchConfiguration("enable_unity_arm_bridge")
+    enable_car_c_writer = LaunchConfiguration("enable_car_c_writer")
     waypoints_file = LaunchConfiguration("waypoints_file")
 
     return LaunchDescription(
@@ -23,6 +24,11 @@ def generate_launch_description():
                 description="Start the Unity arm republisher.",
             ),
             DeclareLaunchArgument(
+                "enable_car_c_writer",
+                default_value="false",
+                description="Start the wheel serial writer for the real car.",
+            ),
+            DeclareLaunchArgument(
                 "waypoints_file",
                 default_value="",
                 description="Optional path to mission_waypoints.yaml",
@@ -30,13 +36,18 @@ def generate_launch_description():
             Node(
                 package="car_control_pkg",
                 executable="car_control_node",
-                name="car_control_node",
                 output="screen",
+            ),
+            Node(
+                package="pros_car_py",
+                executable="carC_writer",
+                name="car_c_control_subscriber",
+                output="screen",
+                condition=IfCondition(enable_car_c_writer),
             ),
             Node(
                 package="arm_control_pkg",
                 executable="arm_control_node",
-                name="arm_control_node",
                 output="screen",
             ),
             Node(

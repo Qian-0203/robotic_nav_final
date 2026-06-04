@@ -13,8 +13,7 @@ from geometry_msgs.msg import PoseWithCovarianceStamped
 from rclpy.action import ActionClient, ActionServer, CancelResponse, GoalResponse
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
-from std_msgs.msg import String
-from visualization_msgs.msg import Marker, MarkerArray
+from std_msgs.msg import Float32MultiArray, String
 
 
 ACTION_MAPPINGS = {
@@ -44,14 +43,14 @@ class MissionTaskNode(Node):
         self.goal_pose_pub = self.create_publisher(PoseStamped, "/goal_pose", 10)
         self.target_label_pub = self.create_publisher(String, "/target_label", 10)
         self.chassis_signal_pub = self.create_publisher(String, "car_control_signal", 10)
-        self.bear_candidate_marker_pub = self.create_publisher(
-            MarkerArray, "/bear_candidate_markers", 10
+        self.rear_wheel_pub = self.create_publisher(
+            Float32MultiArray, "car_C_rear_wheel", 10
         )
-
+        self.front_wheel_pub = self.create_publisher(
+            Float32MultiArray, "car_C_front_wheel", 10
+        )
         self.object_coordinates = {}
         self.object_detections = []
-        self.bear_candidates = []
-        self._collect_bear_candidates = False
         self._last_control_action = None
         self._last_control_log_time = 0.0
         self._last_control_log_action = None
@@ -138,17 +137,7 @@ class MissionTaskNode(Node):
         self._prepare_mission_start_pose()
         start_pose = self._capture_start_pose()
         self._set_target_label("bear")
-        selected_candidate = self._explore_and_select_bear(goal_handle)
-        if selected_candidate:
-            self.get_logger().info(
-                "Selected bear candidate: "
-                f"depth={selected_candidate['offset_flu'][0]:.3f}m "
-                f"avg_confidence={selected_candidate['confidence']:.3f} "
-                f"best_confidence={selected_candidate['best_confidence']:.3f} "
-                f"observations={selected_candidate['observations']} "
-                f"map=({selected_candidate['map_x']:.3f}, "
-                f"{selected_candidate['map_y']:.3f})"
-            )
+        self._turn_left_until_confident_bear(goal_handle)
         self._visual_servo(goal_handle, "bear", "align_bear_for_pickup")
         self._send_arm_goal(goal_handle, "pickup_bear")
         self._return_to_start(goal_handle, start_pose)
@@ -164,7 +153,6 @@ class MissionTaskNode(Node):
             "bridge",
             "align_bridge",
             target_depth=0.8,
-            timeout_sec=20.0,
         )
         self._timed_drive(goal_handle, "cross_bridge", "FORWARD_SLOW", "bridge_cross_sec")
         self._return_to_start(goal_handle, start_pose)
@@ -326,7 +314,12 @@ class MissionTaskNode(Node):
 
         while time.monotonic() - start < timeout:
             self._check_cancel(goal_handle)
-            coords = self.object_coordinates.get(label)
+            detection = self._best_detection(label) if label == "bear" else None
+            coords = (
+                detection["offset_flu"]
+                if detection is not None
+                else self.object_coordinates.get(label)
+            )
             if coords and len(coords) == 3:
                 saw_target = True
                 depth, lateral, _height = coords
@@ -376,266 +369,53 @@ class MissionTaskNode(Node):
             time.sleep(0.1)
         self._publish_control("STOP")
 
-    def _explore_and_select_bear(self, goal_handle):
-        self.bear_candidates = []
-        self._collect_bear_candidates = True
-        try:
-            start_yaw = self._get_current_yaw()
-            if start_yaw is None:
-                self.get_logger().warn(
-                    "No /amcl_pose yaw available; using timed bear explore fallback"
-                )
-                self._timed_drive(
-                    goal_handle,
-                    "explore_bear_candidates:left",
-                    "COUNTERCLOCKWISE_ROTATION_SLOW",
-                    "bear_explore_turn_sec",
-                )
-                self._settle_for_detection(
-                    goal_handle, "explore_bear_candidates:left_settle"
-                )
-            else:
-                scan_yaw = self._normalize_angle(
-                    start_yaw
-                    + float(
-                        self.config.get("visual_servo", {}).get(
-                            "bear_explore_turn_rad", math.pi / 2.0
-                        )
-                    )
-                )
-                self._rotate_to_yaw(
-                    goal_handle,
-                    "explore_bear_candidates:left_90",
-                    scan_yaw,
-                )
-                self._settle_for_detection(
-                    goal_handle, "explore_bear_candidates:left_settle"
-                )
-        finally:
-            self._collect_bear_candidates = False
-            self._publish_control("STOP")
+    def _turn_left_until_confident_bear(self, goal_handle):
+        servo_cfg = self.config.get("visual_servo", {})
+        min_conf = float(servo_cfg.get("bear_candidate_min_confidence", 0.9))
+        timeout = float(servo_cfg.get("search_timeout_sec", 45.0))
 
-        candidates = self._dedupe_bear_candidates(self.bear_candidates)
-        self._publish_bear_candidate_markers(candidates)
-        if not candidates:
-            self.get_logger().warn(
-                "No stable bear candidates collected during explore scan"
-            )
-            return None
-
-        selected = self._select_bear_candidate(candidates)
-        self._publish_bear_candidate_markers(candidates, selected)
-        self._rotate_toward_bear_candidate(goal_handle, selected)
-        self._settle_for_detection(
-            goal_handle, "explore_bear_candidates:selected_settle"
-        )
-        return selected
-
-    def _rotate_toward_bear_candidate(self, goal_handle, candidate):
-        pose_msg = self.latest_amcl_pose
-        if pose_msg is None:
-            self.get_logger().warn("No /amcl_pose available to face selected bear")
-            return
-        pose = pose_msg.pose.pose
-        dx = candidate["map_x"] - pose.position.x
-        dy = candidate["map_y"] - pose.position.y
-        if math.hypot(dx, dy) < 0.05:
-            return
-        target_yaw = math.atan2(dy, dx)
-        self._rotate_to_yaw(
-            goal_handle,
-            "explore_bear_candidates:face_selected",
-            target_yaw,
-        )
-
-    def _settle_for_detection(self, goal_handle, phase):
-        settle_sec = float(
-            self.config.get("visual_servo", {}).get("bear_explore_settle_sec", 1.0)
-        )
-        if settle_sec <= 0.0:
-            return
-        self._publish_phase(goal_handle, phase)
-        self._publish_control("STOP")
-        end_time = time.monotonic() + settle_sec
-        while time.monotonic() < end_time:
+        self._publish_phase(goal_handle, "find_confident_bear:left")
+        start = time.monotonic()
+        while time.monotonic() - start < timeout:
             self._check_cancel(goal_handle)
+            detection = self._best_detection("bear")
+            if detection is not None and detection["confidence"] >= min_conf:
+                self._publish_control("STOP")
+                self.get_logger().info(
+                    "Found confident bear: "
+                    f"confidence={detection['confidence']:.3f} "
+                    f"offset_flu={detection['offset_flu']}"
+                )
+                return
+            self._publish_control("COUNTERCLOCKWISE_ROTATION_SLOW")
             time.sleep(0.1)
 
-    def _dedupe_bear_candidates(self, candidates):
-        servo_cfg = self.config.get("visual_servo", {})
-        cluster_radius = float(servo_cfg.get("bear_candidate_cluster_radius_m", 0.15))
-        min_observations = int(servo_cfg.get("bear_candidate_min_observations", 3))
-        deduped = []
-        for candidate in candidates:
-            duplicate = None
-            for existing in deduped:
-                dist = math.hypot(
-                    candidate["map_x"] - existing["map_x"],
-                    candidate["map_y"] - existing["map_y"],
-                )
-                if dist < cluster_radius:
-                    duplicate = existing
-                    break
-            if duplicate is None:
-                candidate["observations"] = 1
-                candidate["best_confidence"] = candidate["confidence"]
-                candidate["confidence_sum"] = candidate["confidence"]
-                deduped.append(candidate)
-                continue
-
-            duplicate["observations"] += 1
-            duplicate["confidence_sum"] += candidate["confidence"]
-            duplicate["confidence"] = (
-                duplicate["confidence_sum"] / duplicate["observations"]
-            )
-            if candidate["best_confidence"] > duplicate["best_confidence"]:
-                duplicate["best_confidence"] = candidate["best_confidence"]
-                duplicate["offset_flu"] = candidate["offset_flu"]
-            duplicate["map_x"] = (
-                duplicate["map_x"] * (duplicate["observations"] - 1)
-                + candidate["map_x"]
-            ) / duplicate["observations"]
-            duplicate["map_y"] = (
-                duplicate["map_y"] * (duplicate["observations"] - 1)
-                + candidate["map_y"]
-            ) / duplicate["observations"]
-
-        stable = [c for c in deduped if c["observations"] >= min_observations]
-        return stable
-
-    def _select_bear_candidate(self, candidates):
-        servo_cfg = self.config.get("visual_servo", {})
-        min_conf = float(servo_cfg.get("bear_candidate_min_confidence", 0.25))
-        conf_weight = float(servo_cfg.get("bear_candidate_confidence_weight", 1.0))
-        distance_weight = float(servo_cfg.get("bear_candidate_distance_weight", 0.5))
-        valid = [c for c in candidates if c["confidence"] >= min_conf]
-        if not valid:
-            valid = candidates
-        return max(
-            valid,
-            key=lambda c: (
-                conf_weight * c["confidence"]
-                - distance_weight * max(c["offset_flu"][0], 0.0)
-            ),
+        self._publish_control("STOP")
+        raise RuntimeError(
+            f"Timed out before finding bear confidence >= {min_conf:.2f}"
         )
 
-    def _record_bear_candidates(self, detections):
-        if not self._collect_bear_candidates or self.latest_amcl_pose is None:
-            return
-        for detection in detections:
-            if detection.get("label") != "bear":
+    def _best_detection(self, label):
+        best = None
+        for detection in self.object_detections:
+            if detection.get("label") != label:
                 continue
             offset = detection.get("offset_flu")
             if not isinstance(offset, list) or len(offset) != 3:
                 continue
             try:
                 offset_flu = [float(v) for v in offset]
+                confidence = float(detection.get("confidence", 0.0))
             except (TypeError, ValueError):
                 continue
             if offset_flu[0] <= 0.0:
                 continue
-            map_point = self._offset_flu_to_map(offset_flu)
-            if map_point is None:
-                continue
-            self.bear_candidates.append(
-                {
-                    "label": "bear",
-                    "confidence": float(detection.get("confidence", 0.0)),
-                    "best_confidence": float(detection.get("confidence", 0.0)),
+            if best is None or confidence > best["confidence"]:
+                best = {
+                    "confidence": confidence,
                     "offset_flu": offset_flu,
-                    "map_x": map_point[0],
-                    "map_y": map_point[1],
                 }
-            )
-
-    def _offset_flu_to_map(self, offset_flu):
-        pose_msg = self.latest_amcl_pose
-        if pose_msg is None:
-            return None
-        pose = pose_msg.pose.pose
-        yaw = self._yaw_from_quaternion(pose.orientation)
-        forward, left, _up = offset_flu
-        map_x = pose.position.x + forward * math.cos(yaw) - left * math.sin(yaw)
-        map_y = pose.position.y + forward * math.sin(yaw) + left * math.cos(yaw)
-        return map_x, map_y
-
-    def _publish_bear_candidate_markers(self, candidates, selected=None):
-        marker_array = MarkerArray()
-        clear_marker = Marker()
-        clear_marker.action = Marker.DELETEALL
-        marker_array.markers.append(clear_marker)
-
-        selected_id = id(selected) if selected is not None else None
-        for idx, candidate in enumerate(candidates):
-            marker = Marker()
-            marker.header.stamp = self.get_clock().now().to_msg()
-            marker.header.frame_id = "map"
-            marker.ns = "bear_candidates"
-            marker.id = idx
-            marker.type = Marker.SPHERE
-            marker.action = Marker.ADD
-            marker.pose.position.x = candidate["map_x"]
-            marker.pose.position.y = candidate["map_y"]
-            marker.pose.position.z = 0.1
-            marker.pose.orientation.w = 1.0
-            marker.scale.x = 0.16
-            marker.scale.y = 0.16
-            marker.scale.z = 0.16
-            if id(candidate) == selected_id:
-                marker.color.r = 0.1
-                marker.color.g = 1.0
-                marker.color.b = 0.1
-                marker.scale.x = 0.24
-                marker.scale.y = 0.24
-                marker.scale.z = 0.24
-            else:
-                marker.color.r = 1.0
-                marker.color.g = 0.55
-                marker.color.b = 0.0
-            marker.color.a = 0.9
-            marker_array.markers.append(marker)
-
-        self.bear_candidate_marker_pub.publish(marker_array)
-
-    def _rotate_to_yaw(self, goal_handle, phase, target_yaw):
-        servo_cfg = self.config.get("visual_servo", {})
-        yaw_tol = float(servo_cfg.get("bear_explore_yaw_tolerance_rad", 0.08))
-        timeout = float(servo_cfg.get("bear_explore_timeout_sec", 8.0))
-
-        self._publish_phase(goal_handle, phase)
-        start = time.monotonic()
-        while time.monotonic() - start < timeout:
-            self._check_cancel(goal_handle)
-            current_yaw = self._get_current_yaw()
-            if current_yaw is None:
-                break
-            yaw_error = self._normalize_angle(target_yaw - current_yaw)
-            if abs(yaw_error) <= yaw_tol:
-                self._publish_control("STOP")
-                return
-            action = (
-                "COUNTERCLOCKWISE_ROTATION_SLOW"
-                if yaw_error > 0.0
-                else "CLOCKWISE_ROTATION_SLOW"
-            )
-            self._publish_control(action)
-            time.sleep(0.1)
-
-        self._publish_control("STOP")
-        current_yaw = self._get_current_yaw()
-        if current_yaw is None:
-            self.get_logger().warn(f"{phase} ended without /amcl_pose yaw")
-        else:
-            self.get_logger().warn(
-                f"{phase} timed out: target_yaw={target_yaw:.3f}, "
-                f"current_yaw={current_yaw:.3f}, "
-                f"error={self._normalize_angle(target_yaw - current_yaw):.3f}"
-            )
-
-    def _get_current_yaw(self):
-        if self.latest_amcl_pose is None:
-            return None
-        return self._yaw_from_quaternion(self.latest_amcl_pose.pose.pose.orientation)
+        return best
 
     def _send_nav_goal(self, goal_handle, mode):
         goal = NavGoal.Goal()
@@ -683,9 +463,12 @@ class MissionTaskNode(Node):
         if action == "STOP" and self._last_control_action == "STOP":
             return
         vel = ACTION_MAPPINGS[action]
-        msg = String()
-        msg.data = f"Mission_Control:{action}"
-        self.chassis_signal_pub.publish(msg)
+        front_msg = Float32MultiArray()
+        rear_msg = Float32MultiArray()
+        front_msg.data = vel[0:2]
+        rear_msg.data = vel[2:4]
+        self.front_wheel_pub.publish(front_msg)
+        self.rear_wheel_pub.publish(rear_msg)
         self._last_control_action = action
         self._log_control_publish(action, vel[0:2], vel[2:4])
 
@@ -702,6 +485,8 @@ class MissionTaskNode(Node):
             "Chassis command "
             f"{action}: front={list(front_vel)} rear={list(rear_vel)} "
             f"signal_subs={self.chassis_signal_pub.get_subscription_count()} "
+            f"front_subs={self.front_wheel_pub.get_subscription_count()} "
+            f"rear_subs={self.rear_wheel_pub.get_subscription_count()} "
             f"front_publishers={self.count_publishers('car_C_front_wheel')} "
             f"rear_publishers={self.count_publishers('car_C_rear_wheel')}"
         )
@@ -719,7 +504,6 @@ class MissionTaskNode(Node):
                     if _is_nearer_offset(float_offset, coordinates.get(label)):
                         coordinates[label] = float_offset
             self.object_coordinates = coordinates
-            self._record_bear_candidates(self.object_detections)
         except Exception as exc:
             self.get_logger().warn(f"Could not parse YOLO object offsets: {exc}")
 
@@ -743,16 +527,6 @@ class MissionTaskNode(Node):
         quat.z = math.sin(yaw / 2.0)
         quat.w = math.cos(yaw / 2.0)
         return quat
-
-    @staticmethod
-    def _yaw_from_quaternion(quat):
-        siny_cosp = 2.0 * (quat.w * quat.z + quat.x * quat.y)
-        cosy_cosp = 1.0 - 2.0 * (quat.y * quat.y + quat.z * quat.z)
-        return math.atan2(siny_cosp, cosy_cosp)
-
-    @staticmethod
-    def _normalize_angle(angle):
-        return math.atan2(math.sin(angle), math.cos(angle))
 
     def _use_waypoints(self):
         return bool(self.config.get("use_waypoints", False))

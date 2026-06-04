@@ -10,7 +10,6 @@ def generate_launch_description():
             Node(
                 package="car_control_pkg",
                 executable="car_control_node",
-                name="car_control_node",
                 output="screen",
             ),
         ]

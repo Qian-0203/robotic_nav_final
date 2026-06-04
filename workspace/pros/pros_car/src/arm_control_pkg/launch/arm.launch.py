@@ -14,7 +14,6 @@ def generate_launch_description():
             Node(
                 package="arm_control_pkg",
                 executable="arm_control_node",
-                name="arm_control_node",
                 output="screen",
             ),
             Node(

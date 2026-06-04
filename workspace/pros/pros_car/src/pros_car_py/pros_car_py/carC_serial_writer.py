@@ -3,7 +3,7 @@ from pros_car_py.car_models import *
 import rclpy
 from rclpy.node import Node
 import orjson
-from std_msgs.msg import String
+from std_msgs.msg import Float32MultiArray
 from serial import Serial
 
 
@@ -11,7 +11,7 @@ class CarCControlSubscriber(Node):
     def __init__(self):
         super().__init__("car_c_control_subscriber")
         self.subscription = self.create_subscription(
-            String,
+            Float32MultiArray,
             DeviceDataTypeEnum.car_C_rear_wheel,  # topic name
             self.listener_callback,
             10,
@@ -22,7 +22,7 @@ class CarCControlSubscriber(Node):
         self._serial = Serial(serial_port, 115200, timeout=0)
         # ------------------------------------------------------------------
         self.subscription_forward = self.create_subscription(
-            String,
+            Float32MultiArray,
             DeviceDataTypeEnum.car_C_front_wheel,  # topic name
             self.listener_callback_forward,
             10,
@@ -36,55 +36,25 @@ class CarCControlSubscriber(Node):
 
     # -------------------------------------------------------------------
     def listener_callback(self, msg):
-        try:
-            control_data = orjson.loads(msg.data)
-            # TODO use more clear method to write
-            # TODO divide serial data and data validation
-            if control_data.get("type") == DeviceDataTypeEnum.car_C_rear_wheel:
-                self.process_control_data(CarCControl, control_data.get("data", {}))
-        except orjson.JSONDecodeError as e:
-            self.get_logger().error("JSON decode error: {}".format(e))
-        except KeyError as e:
-            self.get_logger().error("Missing key in JSON data: {}".format(e))
+        self.process_control_data(msg.data)
 
     def listener_callback_forward(self, msg):
-        try:
-            control_data_forward = orjson.loads(msg.data)
-            # TODO use more clear method to write
-            # TODO divide serial data and data validation
-            if control_data_forward.get("type") == DeviceDataTypeEnum.car_C_front_wheel:
-                self.process_control_data_forward(
-                    CarCControl, control_data_forward.get("data", {})
-                )
-        except orjson.JSONDecodeError as e:
-            self.get_logger().error("JSON decode error: {}".format(e))
-        except KeyError as e:
-            self.get_logger().error("Missing key in JSON data: {}".format(e))
+        self.process_control_data_forward(msg.data)
 
-    def process_control_data(self, type_cls, data: dict):
-        # Process the control data as needed
-        # direction = data.get('direction')
-        # target_vel = data.get('target_vel')
-        # TODO should be customized
-        control_signal = type_cls(**data)
+    def process_control_data(self, target_vel):
+        control_signal = CarCControl(target_vel=list(target_vel))
 
         self._serial.write(
             orjson.dumps(dict(control_signal), option=orjson.OPT_APPEND_NEWLINE)
         )
-        # self.get_logger().info(f'Received type:{type(data)} data: {data}')
         self.get_logger().info(f"Received {control_signal}")
 
-    def process_control_data_forward(self, type_cls, data: dict):
-        # Process the control data as needed
-        # direction = data.get('direction')
-        # target_vel = data.get('target_vel')
-        # TODO should be customized
-        control_signal_forward = type_cls(**data)
+    def process_control_data_forward(self, target_vel):
+        control_signal_forward = CarCControl(target_vel=list(target_vel))
 
         self._serial_forward.write(
             orjson.dumps(dict(control_signal_forward), option=orjson.OPT_APPEND_NEWLINE)
         )
-        # self.get_logger().info(f'Received type:{type(data)} data: {data}')
         self.get_logger().info(f"Received {control_signal_forward}")
 
 
