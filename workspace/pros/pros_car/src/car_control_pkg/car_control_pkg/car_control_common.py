@@ -342,5 +342,7 @@ class BaseCarControlNode(Node):
     # If you inherit from this class, you must implement this method
     def handle_command(self, mode, command):
         """Handle parsed commands - to be implemented by subclasses"""
-        # Default implementation does nothing
-        pass
+        if mode == "Mission_Control":
+            action = command.upper()
+            self.get_logger().info(f"Mission control command received: {action}")
+            self.publish_control(action)

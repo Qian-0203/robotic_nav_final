@@ -130,7 +130,14 @@ class CameraGeometry:
                 # Keep non-numeric results as is (though unlikely for coordinates)
                 rounded_result = result
 
-            results.append({"label": label, result_key: rounded_result})
+            result_obj = {
+                "label": label,
+                "confidence": round(float(obj.get("confidence", 0.0)), 3),
+                result_key: rounded_result,
+            }
+            if "box" in obj:
+                result_obj["box"] = [int(v) for v in obj["box"]]
+            results.append(result_obj)
 
         # Convert the list of dictionaries to a JSON string
         return json.dumps(results)

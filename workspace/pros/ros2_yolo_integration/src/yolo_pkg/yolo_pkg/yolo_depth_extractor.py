@@ -100,6 +100,7 @@ class YoloDepthExtractor:
             objects_with_depth.append(
                 {
                     "label": label,
+                    "confidence": float(obj.get("confidence", 0.0)),
                     "box": (x1, y1, x2, y2),
                     "depth": (
                         float(depth_value) if not np.isnan(depth_value) else np.nan

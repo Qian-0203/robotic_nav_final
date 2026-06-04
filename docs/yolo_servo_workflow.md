@@ -50,10 +50,23 @@ cd workspace/pros/ros2_yolo_integration
 ./yolo_activate.sh --task yolo_mode:=1 enable_arucode:=false
 ```
 
+```bash
+docker exec -it pros_car bash   
+
+```
+
 Send a mission task after the mission stack is running:
 
 ```bash
+cd /workspaces
+source /opt/ros/${ROS_DISTRO:-humble}/setup.bash
+source install/setup.bash
 ros2 run mission_task_pkg mission_task_client task1_bear
+
+```
+```bash
+ros2 topic echo /car_C_front_wheel
+ros2 topic echo /car_C_rear_wheel
 ```
 
 Manual navigation smoke test:

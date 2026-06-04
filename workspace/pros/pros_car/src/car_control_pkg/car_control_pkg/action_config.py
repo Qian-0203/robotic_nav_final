@@ -15,6 +15,12 @@ rotate_vel_median = 5.5 * speed_ratio
 ACTION_MAPPINGS = {
     "FORWARD": [vel, vel, vel, vel],  # 前進
     "FORWARD_SLOW": [vel_slow, vel_slow, vel_slow, vel_slow],  # 前進
+    "FORWARD_CREEP": [
+        vel_slow,
+        vel_slow,
+        vel_slow,
+        vel_slow,
+    ],
     "LEFT_FRONT": [rotate_vel, rotate_vel * 1.2, rotate_vel, rotate_vel * 1.2],  # 左前
     "COUNTERCLOCKWISE_ROTATION": [
         -rotate_vel,
@@ -28,6 +34,12 @@ ACTION_MAPPINGS = {
         -rotate_vel_slow,
         rotate_vel_slow,
     ],  # 慢左自轉
+    "COUNTERCLOCKWISE_ROTATION_CREEP": [
+        -4.0 * speed_ratio,
+        4.0 * speed_ratio,
+        -4.0 * speed_ratio,
+        4.0 * speed_ratio,
+    ],
     "COUNTERCLOCKWISE_ROTATION_MEDIAN": [
         -rotate_vel_median,
         rotate_vel_median,
@@ -43,6 +55,12 @@ ACTION_MAPPINGS = {
         rotate_vel_slow,
         -rotate_vel_slow,
     ],  # 右慢自轉
+    "CLOCKWISE_ROTATION_CREEP": [
+        4.0 * speed_ratio,
+        -4.0 * speed_ratio,
+        4.0 * speed_ratio,
+        -4.0 * speed_ratio,
+    ],
     "CLOCKWISE_ROTATION_MEDIAN": [
         rotate_vel_median,
         -rotate_vel_median,
