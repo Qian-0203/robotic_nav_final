@@ -53,6 +53,7 @@ waypoints:
 dynamic_approach:
   enabled: true
   detection_timeout_sec: 45.0
+  initial_no_detection_forward_sec: 2.0
   fallback_to_waypoint: true
   min_confidence:
     default: 0.0
@@ -62,6 +63,15 @@ dynamic_approach:
     bear: 0.5
     knob: 0.5
     bridge: 1.0
+  short_hop:
+    default:
+      enabled: false
+      max_hops: 5
+      step_distance_m: 2.0
+      goal_tolerance_m: 0.15
+      detection_refresh_timeout_sec: 20.0
+    bear:
+      enabled: true
 
 visual_servo:
   target_depth_m: 0.41

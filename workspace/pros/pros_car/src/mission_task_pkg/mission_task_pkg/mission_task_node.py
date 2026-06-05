@@ -203,10 +203,13 @@ class MissionTaskNode(Node):
 
         self._publish_phase(goal_handle, phase)
         try:
-            detection = self._wait_for_detection(goal_handle, label, dynamic_cfg, phase)
-            goal_pose = self._build_dynamic_goal_pose(label, detection, dynamic_cfg)
-            self._publish_goal_pose(goal_pose)
-            self._send_nav_goal(goal_handle, "Manual_Nav")
+            if self._use_short_hop_approach(label, dynamic_cfg):
+                self._run_short_hop_approach(goal_handle, label, phase, dynamic_cfg)
+            else:
+                detection = self._wait_for_detection(goal_handle, label, dynamic_cfg, phase)
+                goal_pose = self._build_dynamic_goal_pose(label, detection, dynamic_cfg)
+                self._publish_goal_pose(goal_pose)
+                self._send_nav_goal(goal_handle, "Manual_Nav")
         except MissionCanceled:
             raise
         except Exception as exc:
@@ -228,11 +231,7 @@ class MissionTaskNode(Node):
     def _wait_for_detection(self, goal_handle, label, dynamic_cfg, phase):
         timeout = float(dynamic_cfg.get("detection_timeout_sec", 45.0))
         min_confidence = self._dynamic_min_confidence(label, dynamic_cfg)
-        missing_target_action = (
-            "COUNTERCLOCKWISE_ROTATION_SLOW"
-            if phase == "approach_detected_bear"
-            else "CLOCKWISE_ROTATION_SLOW"
-        )
+        forward_search_sec = float(dynamic_cfg.get("initial_no_detection_forward_sec", 2.0))
         start = time.monotonic()
         while time.monotonic() - start < timeout:
             self._check_cancel(goal_handle)
@@ -248,12 +247,60 @@ class MissionTaskNode(Node):
                     f"offset_flu={detection['offset_flu']}"
                 )
                 return detection
+            elapsed = time.monotonic() - start
+            missing_target_action = (
+                "FORWARD_SLOW"
+                if elapsed < forward_search_sec
+                else "COUNTERCLOCKWISE_ROTATION_SLOW"
+            )
             self._publish_control(missing_target_action)
             time.sleep(0.1)
         self._publish_control("STOP")
         raise RuntimeError(
             f"Timed out waiting for {label} confidence >= {min_confidence:.2f}"
         )
+
+    def _run_short_hop_approach(self, goal_handle, label, phase, dynamic_cfg):
+        hop_cfg = self._short_hop_config(label, dynamic_cfg)
+        max_hops = int(hop_cfg.get("max_hops", 3))
+        step_distance = float(hop_cfg.get("step_distance_m", 0.6))
+        goal_tolerance = float(hop_cfg.get("goal_tolerance_m", 0.15))
+        detection_timeout = float(
+            hop_cfg.get(
+                "detection_refresh_timeout_sec",
+                dynamic_cfg.get("detection_timeout_sec", 45.0),
+            )
+        )
+
+        if max_hops <= 0:
+            raise RuntimeError("short-hop dynamic approach requires max_hops > 0")
+        if step_distance <= 0.0:
+            raise RuntimeError("short-hop dynamic approach requires step_distance_m > 0")
+
+        refresh_cfg = dict(dynamic_cfg)
+        refresh_cfg["detection_timeout_sec"] = detection_timeout
+
+        for hop_idx in range(1, max_hops + 1):
+            self._publish_phase(goal_handle, f"{phase}:hop_{hop_idx}")
+            detection = self._wait_for_detection(goal_handle, label, refresh_cfg, phase)
+            full_goal_pose = self._build_dynamic_goal_pose(label, detection, dynamic_cfg)
+            hop_goal_pose, is_final_goal = self._build_short_hop_goal_pose(
+                full_goal_pose,
+                step_distance,
+                goal_tolerance,
+            )
+            self._publish_goal_pose(hop_goal_pose)
+            self.get_logger().info(
+                f"Short-hop {label} approach {hop_idx}/{max_hops}: "
+                f"goal=({hop_goal_pose.pose.position.x:.2f}, "
+                f"{hop_goal_pose.pose.position.y:.2f}) "
+                f"final={is_final_goal}"
+            )
+            self._send_nav_goal(goal_handle, "Manual_Nav")
+            if is_final_goal:
+                return
+
+        raise RuntimeError(f"Short-hop dynamic approach to {label} exceeded {max_hops} hops")
 
     def _build_dynamic_goal_pose(self, label, detection, dynamic_cfg):
         if self.latest_amcl_pose is None:
@@ -283,6 +330,36 @@ class MissionTaskNode(Node):
         )
         return msg
 
+    def _build_short_hop_goal_pose(self, full_goal_pose, step_distance, goal_tolerance):
+        if self.latest_amcl_pose is None:
+            raise RuntimeError("missing /amcl_pose")
+
+        robot_pose = self.latest_amcl_pose.pose.pose
+        robot_x = robot_pose.position.x
+        robot_y = robot_pose.position.y
+        goal_x = full_goal_pose.pose.position.x
+        goal_y = full_goal_pose.pose.position.y
+        dx = goal_x - robot_x
+        dy = goal_y - robot_y
+        distance = math.hypot(dx, dy)
+        is_final_goal = distance <= step_distance + goal_tolerance
+
+        msg = PoseStamped()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = full_goal_pose.header.frame_id
+        msg.pose.position.z = 0.0
+        msg.pose.orientation = full_goal_pose.pose.orientation
+
+        if is_final_goal or distance <= 1e-6:
+            msg.pose.position.x = goal_x
+            msg.pose.position.y = goal_y
+            return msg, True
+
+        scale = step_distance / distance
+        msg.pose.position.x = robot_x + dx * scale
+        msg.pose.position.y = robot_y + dy * scale
+        return msg, False
+
     def _dynamic_min_confidence(self, label, dynamic_cfg):
         min_confidence = dynamic_cfg.get("min_confidence", 0.0)
         if isinstance(min_confidence, dict):
@@ -294,6 +371,23 @@ class MissionTaskNode(Node):
         if isinstance(standoff_cfg, dict):
             return float(standoff_cfg.get(label, standoff_cfg.get("default", 0.9)))
         return float(standoff_cfg or 0.9)
+
+    def _use_short_hop_approach(self, label, dynamic_cfg):
+        hop_cfg = self._short_hop_config(label, dynamic_cfg)
+        return bool(hop_cfg.get("enabled", False))
+
+    def _short_hop_config(self, label, dynamic_cfg):
+        hop_cfg = dynamic_cfg.get("short_hop", {})
+        if not isinstance(hop_cfg, dict):
+            return {}
+        merged = dict(hop_cfg.get("default", {}))
+        label_cfg = hop_cfg.get(label, {})
+        if isinstance(label_cfg, dict):
+            merged.update(label_cfg)
+        for key, value in hop_cfg.items():
+            if key not in {"default", label} and key not in merged:
+                merged[key] = value
+        return merged
 
     def _navigate(self, goal_handle, waypoint_name):
         self._check_cancel(goal_handle)
