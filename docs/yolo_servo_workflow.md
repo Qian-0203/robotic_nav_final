@@ -18,6 +18,12 @@ Both workspaces run on the shared Docker network `compose_my_bridge_network`.
    - Starts `mission_task_pkg/mission_task_node`.
    - The mission node coordinates navigation, visual servoing, and arm actions.
    - Supported tasks: `task1_bear`, `task2_bridge`, `task3_knob`.
+   - Each task uses a shared two-stage target approach:
+     1. YOLO detects the target and the mission node estimates the target pose
+        in `map`.
+     2. The mission node publishes a coarse stand-off `/goal_pose`, runs
+        `Manual_Nav`, then switches to slow YOLO visual servo for fine
+        alignment.
 
 2. Visual detection
    - Starts `yolo_pkg/yolo_detection_node`.
@@ -119,16 +125,76 @@ ros2 action send_goal /nav_action_server action_interface/action/NavGoal "{mode:
 ## Mission Data Flow
 
 - `/target_label`: mission node tells YOLO which object to prioritize.
-- `/yolo/object/offset`: YOLO publishes detected object offsets as JSON.
-- `/goal_pose`: mission node publishes navigation goals.
+- `/yolo/object/offset`: YOLO publishes detected object offsets as JSON with
+  `offset_flu = [forward, left, up]`.
+- `/goal_pose`: mission node publishes configured fallback waypoints, captured
+  return poses, or dynamically estimated stand-off goals in front of detected
+  targets.
 - `/move_base_simple/goal`: accepted as a Foxglove/RViz-compatible alias for
   `/goal_pose`.
 - `nav_action_server`: car navigation action server.
 - `arm_action_server`: arm action server.
 - `mission_task_server`: high-level task action server.
 
-`Manual_Nav` computes a Nav2 path from `/goal_pose` through
-`/compute_path_to_pose` if no `/plan` has arrived yet.
+`Manual_Nav` clears its cached path and computes a fresh Nav2 path from the
+latest `/goal_pose` through `/compute_path_to_pose`.
+
+## YOLO-Guided Approach
+
+The mission node treats map navigation as the coarse approach and visual servo
+as fine alignment:
+
+1. Publish `/target_label` for the task target.
+2. Wait for a valid YOLO detection.
+3. Estimate target map pose from `/amcl_pose` plus YOLO `offset_flu`.
+4. Publish a stand-off `/goal_pose` facing the detected target.
+5. Run `Manual_Nav`.
+6. Use slow direct wheel commands for final YOLO alignment.
+
+Default dynamic stand-off distances:
+
+- `bear`: `0.65 m`
+- `knob`: `0.65 m`
+- `bridge`: `1.00 m`
+
+If dynamic detection, pose estimation, or navigation fails, the mission falls
+back to the configured waypoint for that task.
+
+Current fine visual-servo tuning:
+
+- forward wheel command: `100`
+- rotation wheel command: `250`
+- lateral tolerance: `0.03 m`
+- depth tolerance: `0.04 m`
+- command period: `0.20 s`
+- rotation settle time: `0.35 s`
+
+These slow commands are intentionally separate from coarse navigation. They are
+only used while aligning to the YOLO target after `Manual_Nav` has already
+reached the stand-off goal.
+
+## Debug Notes
+
+The wheel topics can have multiple publishers during mission bringup:
+
+- `car_control_node`
+- `manual_control_node`
+- `mission_task_node`
+- `arm_commute_node`
+
+If wheel speed appears to flicker between motion and zero, first check active
+publishers and the mission log:
+
+```bash
+ros2 topic info -v /car_C_front_wheel
+ros2 topic info -v /car_C_rear_wheel
+ros2 topic echo /yolo/object/offset
+```
+
+During visual servo, changing YOLO lateral/depth offsets can also make the
+mission alternate between forward, clockwise, counterclockwise, and stop
+commands. The coarse `/goal_pose` should place the robot close enough that this
+stage only performs small final corrections.
 
 ## Test Results
 

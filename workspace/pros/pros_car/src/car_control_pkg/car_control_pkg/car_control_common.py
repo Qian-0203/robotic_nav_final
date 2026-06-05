@@ -95,6 +95,7 @@ class BaseCarControlNode(Node):
         self.latest_camera_depth = None
         self.latest_yolo_info = None
         self.latest_cmd_vel = None
+        self.custom_nav_active = False
 
         # Create navigation data subscribers if enabled
         if enable_nav_subscribers:
@@ -283,6 +284,9 @@ class BaseCarControlNode(Node):
         return None, None
 
     def cmd_vel_callback(self, msg: Twist):
+        if self.custom_nav_active:
+            return
+
         wheel_distance = 0.5
         max_speed = 30.0
         min_speed = -30.0
@@ -302,6 +306,9 @@ class BaseCarControlNode(Node):
 
     def get_cmd_vel_data(self):
         return self.latest_cmd_vel
+
+    def set_custom_nav_active(self, active: bool):
+        self.custom_nav_active = active
 
     def get_path_points(self, include_orientation=True):
         path_points = []

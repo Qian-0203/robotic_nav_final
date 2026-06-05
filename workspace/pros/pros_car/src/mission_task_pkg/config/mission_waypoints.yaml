@@ -3,6 +3,9 @@
 # Set false to use YOLO search/servo without a fixed navigation waypoint.
 use_waypoints: true
 
+mission:
+  startup_settle_sec: 3.0
+
 # Published at mission start, matching the manual navigation smoke test.
 initial_pose:
   publish: true
@@ -12,7 +15,7 @@ initial_pose:
   yaw: 0.0
   frame_id: map
   yaw_covariance: 0.0685
-  settle_sec: 0.5
+  settle_sec: 3.0
 
 # Optional fallback poses. Enable use_waypoints only after tuning these in Unity.
 waypoints:
@@ -47,12 +50,28 @@ waypoints:
     yaw: 0.0
     frame_id: map
 
+dynamic_approach:
+  enabled: true
+  detection_timeout_sec: 45.0
+  fallback_to_waypoint: true
+  min_confidence:
+    default: 0.0
+    bear: 0.9
+  standoff_m:
+    default: 0.5
+    bear: 0.5
+    knob: 0.5
+    bridge: 1.0
+
 visual_servo:
-  target_depth_m: 0.45
-  lateral_tolerance_m: 0.08
-  depth_tolerance_m: 0.08
-  timeout_sec: 45.0
-  search_timeout_sec: 45.0
+  target_depth_m: 0.41
+  lateral_tolerance_m: 0.02
+  depth_tolerance_m: 0.02
+  command_period_sec: 0.2
+  rotation_settle_sec: 0.35
+  aligned_settle_sec: 3.0
+  timeout_sec: 100.0
+  search_timeout_sec: 100.0
   bear_candidate_min_confidence: 0.9
   bridge_cross_sec: 4.0
   door_enter_sec: 2.0

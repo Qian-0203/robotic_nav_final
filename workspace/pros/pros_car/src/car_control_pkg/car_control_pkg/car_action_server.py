@@ -57,41 +57,46 @@ class NavigationActionServer(Node):
         print("mode : ", mode)
         rate = self.create_rate(10)
         self.nav_controller.reset_index()
-        if mode == "Manual_Nav":
-            plan_result = self._ensure_global_plan(goal_handle)
-            if isinstance(plan_result, NavGoal.Result):
-                goal_handle.abort()
-                return plan_result
-
-        while rclpy.ok():
-            # First give executor time to process callbacks
-            rate.sleep()
-            car_auto_method = self._select_car_auto_method(mode)
-            if goal_handle.is_cancel_requested:
-                self.get_logger().info("Navigation canceled by user")
-                self.car_control_node.publish_control("STOP")
-                result = NavGoal.Result(success=False, message="Navigation canceled")
-                goal_handle.canceled()
-                break
-
-            nav_result = car_auto_method()
-            if isinstance(nav_result, NavGoal.Result):
-                if nav_result.success:
-                    self.get_logger().info(
-                        f"Navigation completed: {nav_result.message}"
-                    )
-                    goal_handle.succeed()
-                else:
-                    self.get_logger().error(f"Navigation failed: {nav_result.message}")
+        self.car_control_node.set_custom_nav_active(True)
+        try:
+            if mode == "Manual_Nav":
+                self.car_control_node.latest_global_plan = None
+                plan_result = self._ensure_global_plan(goal_handle)
+                if isinstance(plan_result, NavGoal.Result):
                     goal_handle.abort()
-                # Exit the loop and return the result once a final state is reached.
-                result = nav_result
-                break
+                    return plan_result
 
-            # Publish feedback if navigation is ongoing
-            feedback_msg = NavGoal.Feedback()
-            feedback_msg.distance_to_goal = float(0.0)
-            goal_handle.publish_feedback(feedback_msg)
+            while rclpy.ok():
+                # First give executor time to process callbacks
+                rate.sleep()
+                car_auto_method = self._select_car_auto_method(mode)
+                if goal_handle.is_cancel_requested:
+                    self.get_logger().info("Navigation canceled by user")
+                    self.car_control_node.publish_control("STOP")
+                    result = NavGoal.Result(success=False, message="Navigation canceled")
+                    goal_handle.canceled()
+                    break
+
+                nav_result = car_auto_method()
+                if isinstance(nav_result, NavGoal.Result):
+                    if nav_result.success:
+                        self.get_logger().info(
+                            f"Navigation completed: {nav_result.message}"
+                        )
+                        goal_handle.succeed()
+                    else:
+                        self.get_logger().error(f"Navigation failed: {nav_result.message}")
+                        goal_handle.abort()
+                    # Exit the loop and return the result once a final state is reached.
+                    result = nav_result
+                    break
+
+                # Publish feedback if navigation is ongoing
+                feedback_msg = NavGoal.Feedback()
+                feedback_msg.distance_to_goal = float(0.0)
+                goal_handle.publish_feedback(feedback_msg)
+        finally:
+            self.car_control_node.set_custom_nav_active(False)
 
         return result
 

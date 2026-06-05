@@ -113,12 +113,13 @@ flowchart TD
     Start[MissionTask goal received]
     Validate{task_id valid?}
     Capture[Capture /amcl_pose as start pose]
-    NavMode{use_waypoints?}
-    PublishWaypoint[Publish configured /goal_pose]
-    SendNav[Send NavGoal: Manual_Nav]
     SetLabel[Publish /target_label]
-    Search[Rotate until target appears]
-    Servo[Visual servo using /yolo/object/offset]
+    Detect[Wait for YOLO target offset]
+    Estimate[Estimate target pose in map]
+    PublishDynamicGoal[Publish stand-off /goal_pose]
+    SendNav[Send NavGoal: Manual_Nav]
+    Fallback[Fallback to configured waypoint/search]
+    Servo[Slow visual servo fine alignment]
     ArmGoal[Send ArmGoal mode]
     TimedDrive[Timed wheel command]
     ReturnStart[Return to captured start or configured start]
@@ -129,11 +130,12 @@ flowchart TD
     Start --> Validate
     Validate -- no --> Fail
     Validate -- yes --> Capture
-    Capture --> NavMode
-    NavMode -- true --> PublishWaypoint --> SendNav --> SetLabel
-    NavMode -- false --> SetLabel --> Search
-    Search --> Servo
-    SetLabel --> Servo
+    Capture --> SetLabel --> Detect --> Estimate --> PublishDynamicGoal --> SendNav --> Servo
+    Detect -- timeout --> Fallback
+    Estimate -- failed --> Fallback
+    SendNav -- failed --> Fallback
+    Fallback --> SendNav
+    Fallback --> Servo
 
     Servo --> TaskChoice{Task}
     TaskChoice -- bear --> ArmGoal --> ReturnStart --> ArmGoal
@@ -143,15 +145,14 @@ flowchart TD
     ReturnStart --> Stop --> Done
     TimedDrive --> Stop --> Done
     ArmGoal --> Stop --> Done
-    Search -- timeout --> Fail
     Servo -- timeout --> Fail
 ```
 
 Current mission tasks:
 
-- `task1_bear`: capture start pose, find/approach bear, visual-servo to bear, `pickup_bear`, return to start, `place_bear`.
-- `task2_bridge`: capture start pose, find/approach bridge, visual-servo to bridge at a larger target depth, timed forward drive across bridge, return to start.
-- `task3_knob`: find/approach knob, visual-servo to knob, `open_knob`, then enter door by waypoint or timed forward drive.
+- `task1_bear`: capture start pose, YOLO-estimate bear pose, navigate to a coarse stand-off goal, slow visual-servo fine alignment, `pickup_bear`, return to start, `place_bear`.
+- `task2_bridge`: capture start pose, YOLO-estimate bridge pose, navigate to a farther stand-off goal, slow visual-servo alignment at larger target depth, timed forward drive across bridge, return to start.
+- `task3_knob`: YOLO-estimate knob pose, navigate to a coarse stand-off goal, slow visual-servo fine alignment, `open_knob`, then enter door by waypoint or timed forward drive.
 
 ## Architecture Review
 
@@ -253,4 +254,3 @@ The clean separation is:
 6. Fix network documentation so the README and compose files agree on `compose_my_bridge_network`.
 7. Add launch files for complete scenarios: `unity_mission.launch.py`, `real_mission.launch.py`, and `perception.launch.py`.
 8. Add health checks or startup validation for required topics: `/amcl_pose`, `/received_global_plan`, camera topics, `/yolo/object/offset`, and wheel controller topics.
-

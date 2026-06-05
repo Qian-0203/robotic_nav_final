@@ -10,6 +10,7 @@ from action_interface.action import ArmGoal, MissionTask, NavGoal
 from ament_index_python.packages import get_package_share_directory
 from geometry_msgs.msg import PoseStamped, Quaternion
 from geometry_msgs.msg import PoseWithCovarianceStamped
+from mission_task_pkg.mission_geometry import compute_dynamic_goal, select_detection
 from rclpy.action import ActionClient, ActionServer, CancelResponse, GoalResponse
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
@@ -17,9 +18,12 @@ from std_msgs.msg import Float32MultiArray, String
 
 
 ACTION_MAPPINGS = {
-    "FORWARD_SLOW": [150.0, 150.0, 150.0, 150.0],
-    "COUNTERCLOCKWISE_ROTATION_SLOW": [-300.0, 300.0, -300.0, 300.0],
-    "CLOCKWISE_ROTATION_SLOW": [300.0, -300.0, 300.0, -300.0],
+    "FORWARD": [200.0, 200.0, 200.0, 200.0],
+    "COUNTERCLOCKWISE_ROTATION": [-300.0, 300.0, -300.0, 300.0],
+    "CLOCKWISE_ROTATION": [300.0, -300.0, 300.0, -300.0],
+    "FORWARD_SLOW": [100.0, 100.0, 100.0, 100.0],
+    "COUNTERCLOCKWISE_ROTATION_SLOW": [-230.0, 230.0, -230.0, 230.0],
+    "CLOCKWISE_ROTATION_SLOW": [230.0, -230.0, 230.0, -230.0],
     "STOP": [0.0, 0.0, 0.0, 0.0],
 }
 
@@ -61,6 +65,8 @@ class MissionTaskNode(Node):
         self.create_subscription(
             PoseWithCovarianceStamped, "/amcl_pose", self._amcl_callback, 10
         )
+
+        self._settle_after_node_start()
 
         self.nav_client = ActionClient(self, NavGoal, "nav_action_server")
         self.arm_client = ActionClient(self, ArmGoal, "arm_action_server")
@@ -136,8 +142,12 @@ class MissionTaskNode(Node):
     def _run_task1_bear(self, goal_handle):
         self._prepare_mission_start_pose()
         start_pose = self._capture_start_pose()
-        self._set_target_label("bear")
-        self._turn_left_until_confident_bear(goal_handle)
+        self._approach_detected_target(
+            goal_handle,
+            "bear",
+            "approach_detected_bear",
+            "bear_approach",
+        )
         self._visual_servo(goal_handle, "bear", "align_bear_for_pickup")
         self._send_arm_goal(goal_handle, "pickup_bear")
         self._return_to_start(goal_handle, start_pose)
@@ -146,8 +156,12 @@ class MissionTaskNode(Node):
     def _run_task2_bridge(self, goal_handle):
         self._prepare_mission_start_pose()
         start_pose = self._capture_start_pose()
-        self._go_to_target(goal_handle, "bridge", "bridge_entry", "find_bridge")
-        self._set_target_label("bridge")
+        self._approach_detected_target(
+            goal_handle,
+            "bridge",
+            "approach_detected_bridge",
+            "bridge_entry",
+        )
         self._visual_servo(
             goal_handle,
             "bridge",
@@ -159,8 +173,12 @@ class MissionTaskNode(Node):
 
     def _run_task3_knob(self, goal_handle):
         self._prepare_mission_start_pose()
-        self._go_to_target(goal_handle, "knob", "knob_approach", "find_knob")
-        self._set_target_label("knob")
+        self._approach_detected_target(
+            goal_handle,
+            "knob",
+            "approach_detected_knob",
+            "knob_approach",
+        )
         self._visual_servo(goal_handle, "knob", "align_knob_for_opening")
         self._send_arm_goal(goal_handle, "open_knob")
         if self._use_waypoints():
@@ -174,6 +192,108 @@ class MissionTaskNode(Node):
         else:
             self._set_target_label(label)
             self._search_for_target(goal_handle, label, phase)
+
+    def _approach_detected_target(self, goal_handle, label, phase, fallback_waypoint):
+        self._check_cancel(goal_handle)
+        self._set_target_label(label)
+        dynamic_cfg = self.config.get("dynamic_approach", {})
+        if not bool(dynamic_cfg.get("enabled", True)):
+            self._fallback_approach(goal_handle, label, fallback_waypoint, "disabled")
+            return
+
+        self._publish_phase(goal_handle, phase)
+        try:
+            detection = self._wait_for_detection(goal_handle, label, dynamic_cfg, phase)
+            goal_pose = self._build_dynamic_goal_pose(label, detection, dynamic_cfg)
+            self._publish_goal_pose(goal_pose)
+            self._send_nav_goal(goal_handle, "Manual_Nav")
+        except MissionCanceled:
+            raise
+        except Exception as exc:
+            self._publish_control("STOP")
+            self.get_logger().warn(
+                f"Dynamic approach to {label} failed: {exc}; using fallback"
+            )
+            self._fallback_approach(goal_handle, label, fallback_waypoint, str(exc))
+
+    def _fallback_approach(self, goal_handle, label, fallback_waypoint, reason):
+        dynamic_cfg = self.config.get("dynamic_approach", {})
+        if not bool(dynamic_cfg.get("fallback_to_waypoint", True)):
+            raise RuntimeError(f"Dynamic approach to {label} failed: {reason}")
+        if self._use_waypoints():
+            self._navigate(goal_handle, fallback_waypoint)
+        else:
+            self._search_for_target(goal_handle, label, f"find_{label}")
+
+    def _wait_for_detection(self, goal_handle, label, dynamic_cfg, phase):
+        timeout = float(dynamic_cfg.get("detection_timeout_sec", 45.0))
+        min_confidence = self._dynamic_min_confidence(label, dynamic_cfg)
+        missing_target_action = (
+            "COUNTERCLOCKWISE_ROTATION_SLOW"
+            if phase == "approach_detected_bear"
+            else "CLOCKWISE_ROTATION_SLOW"
+        )
+        start = time.monotonic()
+        while time.monotonic() - start < timeout:
+            self._check_cancel(goal_handle)
+            detection = select_detection(
+                self.object_detections,
+                label,
+                min_confidence=min_confidence,
+            )
+            if detection is not None:
+                self.get_logger().info(
+                    f"Selected {label} detection: "
+                    f"confidence={detection['confidence']:.3f} "
+                    f"offset_flu={detection['offset_flu']}"
+                )
+                return detection
+            self._publish_control(missing_target_action)
+            time.sleep(0.1)
+        self._publish_control("STOP")
+        raise RuntimeError(
+            f"Timed out waiting for {label} confidence >= {min_confidence:.2f}"
+        )
+
+    def _build_dynamic_goal_pose(self, label, detection, dynamic_cfg):
+        if self.latest_amcl_pose is None:
+            raise RuntimeError("missing /amcl_pose")
+
+        pose = self.latest_amcl_pose.pose.pose
+        standoff = self._dynamic_standoff(label, dynamic_cfg)
+        goal = compute_dynamic_goal(
+            pose.position.x,
+            pose.position.y,
+            pose.orientation,
+            detection["offset_flu"],
+            standoff,
+        )
+
+        msg = PoseStamped()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = self.latest_amcl_pose.header.frame_id or "map"
+        msg.pose.position.x = goal["goal_x"]
+        msg.pose.position.y = goal["goal_y"]
+        msg.pose.position.z = 0.0
+        msg.pose.orientation = self._quaternion_from_yaw(goal["goal_yaw"])
+        self.get_logger().info(
+            f"Dynamic {label} target=({goal['target_x']:.2f}, "
+            f"{goal['target_y']:.2f}) goal=({goal['goal_x']:.2f}, "
+            f"{goal['goal_y']:.2f}) yaw={goal['goal_yaw']:.2f}"
+        )
+        return msg
+
+    def _dynamic_min_confidence(self, label, dynamic_cfg):
+        min_confidence = dynamic_cfg.get("min_confidence", 0.0)
+        if isinstance(min_confidence, dict):
+            return float(min_confidence.get(label, min_confidence.get("default", 0.0)))
+        return float(min_confidence)
+
+    def _dynamic_standoff(self, label, dynamic_cfg):
+        standoff_cfg = dynamic_cfg.get("standoff_m", {})
+        if isinstance(standoff_cfg, dict):
+            return float(standoff_cfg.get(label, standoff_cfg.get("default", 0.9)))
+        return float(standoff_cfg or 0.9)
 
     def _navigate(self, goal_handle, waypoint_name):
         self._check_cancel(goal_handle)
@@ -193,6 +313,11 @@ class MissionTaskNode(Node):
             time.sleep(0.1)
         time.sleep(1.0)
         self._send_nav_goal(goal_handle, "Manual_Nav")
+
+    def _publish_goal_pose(self, msg):
+        for _ in range(3):
+            self.goal_pose_pub.publish(msg)
+            time.sleep(0.1)
 
     def _capture_start_pose(self):
         deadline = time.monotonic() + 5.0
@@ -279,11 +404,22 @@ class MissionTaskNode(Node):
         for _ in range(3):
             self.initial_pose_pub.publish(msg)
             time.sleep(0.1)
-        time.sleep(float(initial_pose_cfg.get("settle_sec", 0.5)))
+        time.sleep(float(initial_pose_cfg.get("settle_sec", 3.0)))
         self.get_logger().info(
             "Published initial pose: "
             f"({msg.pose.pose.position.x:.2f}, {msg.pose.pose.position.y:.2f})"
         )
+
+    def _settle_after_node_start(self):
+        mission_cfg = self.config.get("mission", {})
+        settle_sec = float(mission_cfg.get("startup_settle_sec", 3.0))
+        if settle_sec <= 0.0:
+            return
+
+        self.get_logger().info(
+            f"Waiting {settle_sec:.1f}s for localization to settle after startup"
+        )
+        time.sleep(settle_sec)
 
     def _set_target_label(self, label):
         msg = String()
@@ -307,6 +443,9 @@ class MissionTaskNode(Node):
         lateral_tol = float(servo_cfg.get("lateral_tolerance_m", 0.01))
         depth_tol = float(servo_cfg.get("depth_tolerance_m", 0.08))
         timeout = float(timeout_sec or servo_cfg.get("timeout_sec", 30.0))
+        command_period = float(servo_cfg.get("command_period_sec", 0.2))
+        rotation_settle = float(servo_cfg.get("rotation_settle_sec", command_period))
+        aligned_settle = float(servo_cfg.get("aligned_settle_sec", 3.0))
 
         self._publish_phase(goal_handle, phase)
         start = time.monotonic()
@@ -325,16 +464,28 @@ class MissionTaskNode(Node):
                 depth, lateral, _height = coords
                 if abs(lateral) <= lateral_tol and depth <= target_depth + depth_tol:
                     self._publish_control("STOP")
+                    if aligned_settle > 0.0:
+                        self.get_logger().info(
+                            f"{label} aligned; waiting {aligned_settle:.1f}s to settle"
+                        )
+                        time.sleep(aligned_settle)
                     return
                 if lateral > lateral_tol:
-                    self._publish_control("COUNTERCLOCKWISE_ROTATION_SLOW")
+                    action = "COUNTERCLOCKWISE_ROTATION_SLOW"
                 elif lateral < -lateral_tol:
-                    self._publish_control("CLOCKWISE_ROTATION_SLOW")
+                    action = "CLOCKWISE_ROTATION_SLOW"
                 else:
-                    self._publish_control("FORWARD_SLOW")
+                    action = "FORWARD_SLOW"
             else:
-                self._publish_control("CLOCKWISE_ROTATION_SLOW")
-            time.sleep(0.1)
+                action = "CLOCKWISE_ROTATION_SLOW"
+            self._publish_control(action)
+            if action in {
+                "CLOCKWISE_ROTATION_SLOW",
+                "COUNTERCLOCKWISE_ROTATION_SLOW",
+            }:
+                time.sleep(rotation_settle)
+            else:
+                time.sleep(command_period)
 
         self._publish_control("STOP")
         if allow_missing and not saw_target:
@@ -396,26 +547,7 @@ class MissionTaskNode(Node):
         )
 
     def _best_detection(self, label):
-        best = None
-        for detection in self.object_detections:
-            if detection.get("label") != label:
-                continue
-            offset = detection.get("offset_flu")
-            if not isinstance(offset, list) or len(offset) != 3:
-                continue
-            try:
-                offset_flu = [float(v) for v in offset]
-                confidence = float(detection.get("confidence", 0.0))
-            except (TypeError, ValueError):
-                continue
-            if offset_flu[0] <= 0.0:
-                continue
-            if best is None or confidence > best["confidence"]:
-                best = {
-                    "confidence": confidence,
-                    "offset_flu": offset_flu,
-                }
-        return best
+        return select_detection(self.object_detections, label)
 
     def _send_nav_goal(self, goal_handle, mode):
         goal = NavGoal.Goal()
