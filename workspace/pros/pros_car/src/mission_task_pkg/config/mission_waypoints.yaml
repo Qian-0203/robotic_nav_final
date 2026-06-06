@@ -4,7 +4,7 @@
 use_waypoints: true
 
 mission:
-  startup_settle_sec: 3.0
+  startup_settle_sec: 1.0
 
 # Published at mission start, matching the manual navigation smoke test.
 initial_pose:
@@ -15,7 +15,7 @@ initial_pose:
   yaw: 0.0
   frame_id: map
   yaw_covariance: 0.0685
-  settle_sec: 3.0
+  settle_sec: 1.0
 
 # Optional fallback poses. Enable use_waypoints only after tuning these in Unity.
 waypoints:
@@ -25,8 +25,8 @@ waypoints:
     yaw: 0.0
     frame_id: map
   bear_approach:
-    x: 0.8
-    y: 0.0
+    x: 0.5
+    y: 0.5
     yaw: 0.0
     frame_id: map
   bridge_entry:
@@ -53,35 +53,39 @@ waypoints:
 dynamic_approach:
   enabled: true
   detection_timeout_sec: 45.0
-  initial_no_detection_forward_sec: 2.0
+  amcl_settle_before_detection_sec:
+    default: 0.0
+    bear: 3.0
   fallback_to_waypoint: true
   min_confidence:
     default: 0.0
-    bear: 0.9
+    bear: 0.92
   standoff_m:
     default: 0.5
-    bear: 0.5
+    bear: 0.35
     knob: 0.5
     bridge: 1.0
   short_hop:
     default:
       enabled: false
       max_hops: 5
-      step_distance_m: 2.0
+      step_distance_m: 1.0
       goal_tolerance_m: 0.15
       detection_refresh_timeout_sec: 20.0
     bear:
       enabled: true
 
 visual_servo:
-  target_depth_m: 0.41
-  lateral_tolerance_m: 0.02
-  depth_tolerance_m: 0.02
+  target_depth_m: 0.39
+  lateral_tolerance_m: 0.03
+  depth_tolerance_m: 0.01
   command_period_sec: 0.2
   rotation_settle_sec: 0.35
   aligned_settle_sec: 3.0
   timeout_sec: 100.0
   search_timeout_sec: 100.0
-  bear_candidate_min_confidence: 0.9
+  bear_recovery_depth_m: 0.75
+  bear_recovery_max_attempts: 2
+  bear_candidate_min_confidence: 0.92
   bridge_cross_sec: 4.0
   door_enter_sec: 2.0

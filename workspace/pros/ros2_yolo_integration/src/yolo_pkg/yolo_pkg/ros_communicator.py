@@ -1,4 +1,5 @@
 from rclpy.node import Node
+from rclpy.qos import QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
 from sensor_msgs.msg import CompressedImage, Imu, Image
 from std_msgs.msg import String, Bool
 from geometry_msgs.msg import PointStamped
@@ -57,13 +58,26 @@ class RosCommunicator(Node):
         }
 
         # Initialize Subscribers
+        sensor_qos = QoSProfile(
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=1,
+            reliability=QoSReliabilityPolicy.BEST_EFFORT,
+        )
+        default_qos_depth = 10
+        sensor_subscribers = {
+            "rgb_compress",
+            "depth_image_compress",
+            "depth_image",
+        }
+
         self.latest_data = {}
         for key, sub in self.subscriber_dict.items():
             self.latest_data[key] = None
             msg_type = sub["msg_type"]
             topic = sub["topic"]
             callback = sub["callback"]
-            self.create_subscription(msg_type, topic, callback, 10)
+            qos_profile = sensor_qos if key in sensor_subscribers else default_qos_depth
+            self.create_subscription(msg_type, topic, callback, qos_profile)
 
         # Initialize Publishers
         self.publisher_instances = {}

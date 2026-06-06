@@ -56,7 +56,10 @@ cd workspace/pros/ros2_yolo_integration
 ./yolo_activate.sh --task yolo_mode:=1 enable_arucode:=false
 ```
 
-```bash
+```bashcd /workspaces
+source /opt/ros/${ROS_DISTRO:-humble}/setup.bash
+source install/setup.bash
+ros2 run mission_task_pkg mission_task_client task1_bear
 docker exec -it pros_car bash   
 
 ```
@@ -93,7 +96,7 @@ header:
   frame_id: map
 pose:
   position:
-    x: 0.8
+    x: 1.0
     y: 0.0
     z: 0.0
   orientation:

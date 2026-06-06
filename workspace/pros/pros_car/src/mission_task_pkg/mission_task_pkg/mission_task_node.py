@@ -141,21 +141,46 @@ class MissionTaskNode(Node):
 
     def _run_task1_bear(self, goal_handle):
         self._prepare_mission_start_pose()
-        start_pose = self._capture_start_pose()
-        self._approach_detected_target(
-            goal_handle,
-            "bear",
-            "approach_detected_bear",
-            "bear_approach",
-        )
-        self._visual_servo(goal_handle, "bear", "align_bear_for_pickup")
+        servo_cfg = self.config.get("visual_servo", {})
+        max_recoveries = int(servo_cfg.get("bear_recovery_max_attempts", 2))
+        recovery_count = 0
+
+        while True:
+            phase = (
+                "approach_detected_bear"
+                if recovery_count == 0
+                else f"recover_bear_dynamic_approach:{recovery_count}"
+            )
+            self._approach_detected_target(
+                goal_handle,
+                "bear",
+                phase,
+                "bear_approach",
+            )
+            try:
+                self._visual_servo(goal_handle, "bear", "align_bear_for_pickup")
+                break
+            except VisualServoRecoveryNeeded as exc:
+                self._publish_control("STOP")
+                if recovery_count >= max_recoveries:
+                    raise RuntimeError(
+                        "Bear alignment recovery exceeded "
+                        f"{max_recoveries} attempt(s): depth={exc.depth:.3f} m "
+                        f"> threshold={exc.threshold:.3f} m"
+                    ) from exc
+                recovery_count += 1
+                self.get_logger().warn(
+                    "Bear depth exceeded recovery threshold during alignment; "
+                    f"rerunning dynamic approach "
+                    f"({recovery_count}/{max_recoveries})"
+                )
+
         self._send_arm_goal(goal_handle, "pickup_bear")
-        self._return_to_start(goal_handle, start_pose)
+        self._return_to_start(goal_handle)
         self._send_arm_goal(goal_handle, "place_bear")
 
     def _run_task2_bridge(self, goal_handle):
         self._prepare_mission_start_pose()
-        start_pose = self._capture_start_pose()
         self._approach_detected_target(
             goal_handle,
             "bridge",
@@ -169,7 +194,7 @@ class MissionTaskNode(Node):
             target_depth=0.8,
         )
         self._timed_drive(goal_handle, "cross_bridge", "FORWARD_SLOW", "bridge_cross_sec")
-        self._return_to_start(goal_handle, start_pose)
+        self._return_to_start(goal_handle)
 
     def _run_task3_knob(self, goal_handle):
         self._prepare_mission_start_pose()
@@ -206,6 +231,7 @@ class MissionTaskNode(Node):
             if self._use_short_hop_approach(label, dynamic_cfg):
                 self._run_short_hop_approach(goal_handle, label, phase, dynamic_cfg)
             else:
+                self._settle_before_detection(goal_handle, label, dynamic_cfg)
                 detection = self._wait_for_detection(goal_handle, label, dynamic_cfg, phase)
                 goal_pose = self._build_dynamic_goal_pose(label, detection, dynamic_cfg)
                 self._publish_goal_pose(goal_pose)
@@ -231,7 +257,6 @@ class MissionTaskNode(Node):
     def _wait_for_detection(self, goal_handle, label, dynamic_cfg, phase):
         timeout = float(dynamic_cfg.get("detection_timeout_sec", 45.0))
         min_confidence = self._dynamic_min_confidence(label, dynamic_cfg)
-        forward_search_sec = float(dynamic_cfg.get("initial_no_detection_forward_sec", 2.0))
         start = time.monotonic()
         while time.monotonic() - start < timeout:
             self._check_cancel(goal_handle)
@@ -247,13 +272,7 @@ class MissionTaskNode(Node):
                     f"offset_flu={detection['offset_flu']}"
                 )
                 return detection
-            elapsed = time.monotonic() - start
-            missing_target_action = (
-                "FORWARD_SLOW"
-                if elapsed < forward_search_sec
-                else "COUNTERCLOCKWISE_ROTATION_SLOW"
-            )
-            self._publish_control(missing_target_action)
+            self._publish_control("COUNTERCLOCKWISE_ROTATION_SLOW")
             time.sleep(0.1)
         self._publish_control("STOP")
         raise RuntimeError(
@@ -282,6 +301,7 @@ class MissionTaskNode(Node):
 
         for hop_idx in range(1, max_hops + 1):
             self._publish_phase(goal_handle, f"{phase}:hop_{hop_idx}")
+            self._settle_before_detection(goal_handle, label, dynamic_cfg)
             detection = self._wait_for_detection(goal_handle, label, refresh_cfg, phase)
             full_goal_pose = self._build_dynamic_goal_pose(label, detection, dynamic_cfg)
             hop_goal_pose, is_final_goal = self._build_short_hop_goal_pose(
@@ -301,6 +321,25 @@ class MissionTaskNode(Node):
                 return
 
         raise RuntimeError(f"Short-hop dynamic approach to {label} exceeded {max_hops} hops")
+
+    def _settle_before_detection(self, goal_handle, label, dynamic_cfg):
+        settle_sec = self._dynamic_label_float(
+            dynamic_cfg.get("amcl_settle_before_detection_sec", 0.0),
+            label,
+            0.0,
+        )
+        if settle_sec <= 0.0:
+            return
+
+        self._publish_control("STOP")
+        self._publish_phase(goal_handle, f"settle_amcl_before_detection:{label}")
+        self.get_logger().info(
+            f"Waiting {settle_sec:.1f}s before detecting {label}"
+        )
+        start = time.monotonic()
+        while time.monotonic() - start < settle_sec:
+            self._check_cancel(goal_handle)
+            time.sleep(0.1)
 
     def _build_dynamic_goal_pose(self, label, detection, dynamic_cfg):
         if self.latest_amcl_pose is None:
@@ -361,16 +400,15 @@ class MissionTaskNode(Node):
         return msg, False
 
     def _dynamic_min_confidence(self, label, dynamic_cfg):
-        min_confidence = dynamic_cfg.get("min_confidence", 0.0)
-        if isinstance(min_confidence, dict):
-            return float(min_confidence.get(label, min_confidence.get("default", 0.0)))
-        return float(min_confidence)
+        return self._dynamic_label_float(dynamic_cfg.get("min_confidence", 0.0), label, 0.0)
 
     def _dynamic_standoff(self, label, dynamic_cfg):
-        standoff_cfg = dynamic_cfg.get("standoff_m", {})
-        if isinstance(standoff_cfg, dict):
-            return float(standoff_cfg.get(label, standoff_cfg.get("default", 0.9)))
-        return float(standoff_cfg or 0.9)
+        return self._dynamic_label_float(dynamic_cfg.get("standoff_m", {}), label, 0.9)
+
+    def _dynamic_label_float(self, value, label, default):
+        if isinstance(value, dict):
+            return float(value.get(label, value.get("default", default)))
+        return float(value if value is not None else default)
 
     def _use_short_hop_approach(self, label, dynamic_cfg):
         hop_cfg = self._short_hop_config(label, dynamic_cfg)
@@ -396,34 +434,14 @@ class MissionTaskNode(Node):
         time.sleep(1.0)
         self._send_nav_goal(goal_handle, "Manual_Nav")
 
-    def _return_to_start(self, goal_handle, start_pose):
+    def _return_to_start(self, goal_handle):
         self._publish_phase(goal_handle, "return_to_start")
-        if start_pose is None:
-            self.get_logger().warn("No /amcl_pose captured; using configured start waypoint")
-            self._navigate(goal_handle, "start")
-            return
-        for _ in range(3):
-            self.goal_pose_pub.publish(start_pose)
-            time.sleep(0.1)
-        time.sleep(1.0)
-        self._send_nav_goal(goal_handle, "Manual_Nav")
+        self._navigate(goal_handle, "start")
 
     def _publish_goal_pose(self, msg):
         for _ in range(3):
             self.goal_pose_pub.publish(msg)
             time.sleep(0.1)
-
-    def _capture_start_pose(self):
-        deadline = time.monotonic() + 5.0
-        while self.latest_amcl_pose is None and time.monotonic() < deadline:
-            time.sleep(0.1)
-        if self.latest_amcl_pose is None:
-            return None
-        msg = PoseStamped()
-        msg.header.stamp = self.get_clock().now().to_msg()
-        msg.header.frame_id = self.latest_amcl_pose.header.frame_id or "map"
-        msg.pose = self.latest_amcl_pose.pose.pose
-        return msg
 
     def _publish_waypoint(self, waypoint_name):
         waypoint = self.config["waypoints"][waypoint_name]
@@ -540,6 +558,7 @@ class MissionTaskNode(Node):
         command_period = float(servo_cfg.get("command_period_sec", 0.2))
         rotation_settle = float(servo_cfg.get("rotation_settle_sec", command_period))
         aligned_settle = float(servo_cfg.get("aligned_settle_sec", 3.0))
+        bear_recovery_depth = float(servo_cfg.get("bear_recovery_depth_m", 1.5))
 
         self._publish_phase(goal_handle, phase)
         start = time.monotonic()
@@ -556,6 +575,25 @@ class MissionTaskNode(Node):
             if coords and len(coords) == 3:
                 saw_target = True
                 depth, lateral, _height = coords
+                if label == "bear":
+                    confidence = (
+                        detection["confidence"] if detection is not None else None
+                    )
+                    confidence_text = (
+                        f"{confidence:.3f}" if confidence is not None else "unknown"
+                    )
+                    self.get_logger().info(
+                        f"Target bear alignment: depth={depth:.3f} m, "
+                        f"lateral={lateral:.3f} m, "
+                        f"confidence={confidence_text}"
+                    )
+                    if bear_recovery_depth > 0.0 and depth > bear_recovery_depth:
+                        self._publish_control("STOP")
+                        raise VisualServoRecoveryNeeded(
+                            label,
+                            depth,
+                            bear_recovery_depth,
+                        )
                 if abs(lateral) <= lateral_tol and depth <= target_depth + depth_tol:
                     self._publish_control("STOP")
                     if aligned_settle > 0.0:
@@ -760,6 +798,17 @@ class MissionTaskNode(Node):
 
 class MissionCanceled(Exception):
     pass
+
+
+class VisualServoRecoveryNeeded(Exception):
+    def __init__(self, label, depth, threshold):
+        super().__init__(
+            f"{label} depth {depth:.3f} m exceeds recovery threshold "
+            f"{threshold:.3f} m"
+        )
+        self.label = label
+        self.depth = depth
+        self.threshold = threshold
 
 
 def main(args=None):

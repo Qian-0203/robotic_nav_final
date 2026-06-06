@@ -121,12 +121,48 @@ class ArmAutoController:
     def place_bear(self, should_cancel=lambda: False):
         if should_cancel():
             return ArmGoal.Result(success=False, message="Canceled by user")
-        self.init_pose(grap=True)
-        time.sleep(0.5)
-        self.arm_agnle_control.arm_index_change(4, 70.0)
-        self.arm_commute_node.publish_arm_angle()
-        time.sleep(0.5)
-        self.init_pose(grap=False)
+
+        place_cfg = self.arm_params.get("place_bear", {})
+        release_publish_count = int(place_cfg.get("release_pose_publish_count", 10))
+        release_publish_period = float(
+            place_cfg.get("release_pose_publish_period_sec", 0.3)
+        )
+        release_settle_sec = float(place_cfg.get("release_pose_settle_sec", 2.0))
+        open_publish_count = int(place_cfg.get("gripper_open_publish_count", 5))
+        open_publish_period = float(
+            place_cfg.get("gripper_open_publish_period_sec", 0.3)
+        )
+        open_settle_sec = float(place_cfg.get("gripper_open_settle_sec", 1.0))
+
+        release_angles = self.arm_agnle_control.arm_pose_change("release")
+        joints_release_radians = [math.radians(angle) for angle in release_angles]
+        self.pybullet_robot_controller.setJointPosition(position=joints_release_radians)
+        for _ in range(release_publish_count):
+            if should_cancel():
+                return ArmGoal.Result(success=False, message="Canceled by user")
+            self.arm_commute_node.publish_arm_angle()
+            time.sleep(release_publish_period)
+        if release_settle_sec > 0.0:
+            time.sleep(release_settle_sec)
+            if should_cancel():
+                return ArmGoal.Result(success=False, message="Canceled by user")
+
+        gripper_open_angle = float(
+            self.arm_params["joints"][4].get("max_angle", 70.0)
+        )
+        self.arm_agnle_control.arm_index_change(4, gripper_open_angle)
+        release_angles = self.arm_agnle_control.get_arm_angles()
+        joints_release_radians = [math.radians(angle) for angle in release_angles]
+        self.pybullet_robot_controller.setJointPosition(position=joints_release_radians)
+        for _ in range(open_publish_count):
+            if should_cancel():
+                return ArmGoal.Result(success=False, message="Canceled by user")
+            self.arm_commute_node.publish_arm_angle()
+            time.sleep(open_publish_period)
+        if open_settle_sec > 0.0:
+            time.sleep(open_settle_sec)
+            if should_cancel():
+                return ArmGoal.Result(success=False, message="Canceled by user")
         return ArmGoal.Result(success=True, message="bear placed")
 
     def open_knob(self, should_cancel=lambda: False):
