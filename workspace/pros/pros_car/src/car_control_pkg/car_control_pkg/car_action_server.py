@@ -133,7 +133,13 @@ class NavigationActionServer(Node):
         compute_goal.planner_id = ""
 
         done = threading.Event()
-        state = {"accepted": False, "path": None, "message": ""}
+        state = {
+            "accepted": False,
+            "status": None,
+            "result": None,
+            "path": None,
+            "message": "",
+        }
 
         def goal_response_callback(future):
             action_goal_handle = future.result()
@@ -146,7 +152,10 @@ class NavigationActionServer(Node):
 
         def result_callback(future):
             try:
-                state["path"] = future.result().result.path
+                action_result = future.result()
+                state["status"] = action_result.status
+                state["result"] = action_result.result
+                state["path"] = state["result"].path
             except Exception as exc:
                 state["message"] = f"Nav2 compute path failed: {exc}"
             done.set()
@@ -162,6 +171,7 @@ class NavigationActionServer(Node):
 
         path = state["path"]
         if not state["accepted"] or path is None or not path.poses:
+            self._log_empty_path_debug(state, start_pose, goal_pose_msg)
             return NavGoal.Result(
                 success=False,
                 message=state["message"] or "Nav2 returned an empty path",
@@ -170,6 +180,37 @@ class NavigationActionServer(Node):
         self.car_control_node.latest_global_plan = path
         self.get_logger().info(f"Computed Nav2 path with {len(path.poses)} poses")
         return None
+
+    def _log_empty_path_debug(self, state, start_pose, goal_pose_msg):
+        nav2_result = state.get("result")
+        error_code = getattr(nav2_result, "error_code", "unavailable")
+        error_msg = getattr(nav2_result, "error_msg", "")
+        path = state.get("path")
+        path_len = len(path.poses) if path is not None else "None"
+
+        start_pos = start_pose.pose.position
+        start_ori = start_pose.pose.orientation
+        goal_pos = goal_pose_msg.pose.position
+        goal_ori = goal_pose_msg.pose.orientation
+
+        self.get_logger().error(
+            "Nav2 returned an empty path debug: "
+            f"accepted={state.get('accepted')}, "
+            f"action_status={state.get('status')}, "
+            f"path_len={path_len}, "
+            f"message='{state.get('message', '')}', "
+            f"nav2_error_code={error_code}, "
+            f"nav2_error_msg='{error_msg}', "
+            f"start_frame='{start_pose.header.frame_id}', "
+            f"start=({start_pos.x:.3f}, {start_pos.y:.3f}, {start_pos.z:.3f}), "
+            f"start_orientation=({start_ori.x:.3f}, {start_ori.y:.3f}, "
+            f"{start_ori.z:.3f}, {start_ori.w:.3f}), "
+            f"goal_frame='{goal_pose_msg.header.frame_id}', "
+            f"goal=({goal_pos.x:.3f}, {goal_pos.y:.3f}, {goal_pos.z:.3f}), "
+            f"goal_orientation=({goal_ori.x:.3f}, {goal_ori.y:.3f}, "
+            f"{goal_ori.z:.3f}, {goal_ori.w:.3f}), "
+            "use_start=True, planner_id=''"
+        )
 
     def _select_car_auto_method(self, mode: str):
         """

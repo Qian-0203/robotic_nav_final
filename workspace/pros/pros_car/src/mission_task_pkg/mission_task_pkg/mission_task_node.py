@@ -27,6 +27,17 @@ ACTION_MAPPINGS = {
     "STOP": [0.0, 0.0, 0.0, 0.0],
 }
 
+VALID_TASK_IDS = {"task1_bear", "task2_bridge", "task3_knob"}
+
+INITIAL_POSE_COVARIANCE = [
+    0.25, 0.0, 0.0, 0.0, 0.0, 0.0,
+    0.0, 0.25, 0.0, 0.0, 0.0, 0.0,
+    0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+    0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+    0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+    0.0, 0.0, 0.0, 0.0, 0.0, 0.0685,
+]
+
 
 def _is_nearer_offset(candidate, current):
     """Return True when candidate has a smaller valid forward depth."""
@@ -99,7 +110,7 @@ class MissionTaskNode(Node):
         return config
 
     def goal_callback(self, goal_request):
-        if goal_request.task_id not in {"task1_bear", "task2_bridge", "task3_knob"}:
+        if goal_request.task_id not in VALID_TASK_IDS:
             self.get_logger().error(f"Unknown task_id: {goal_request.task_id}")
             return GoalResponse.REJECT
         return GoalResponse.ACCEPT
@@ -112,15 +123,16 @@ class MissionTaskNode(Node):
     def execute_callback(self, goal_handle):
         task_id = goal_handle.request.task_id
         result = MissionTask.Result()
+        task_handlers = {
+            "task1_bear": self._run_task1_bear,
+            "task2_bridge": self._run_task2_bridge,
+            "task3_knob": self._run_task3_knob,
+        }
         try:
-            if task_id == "task1_bear":
-                self._run_task1_bear(goal_handle)
-            elif task_id == "task2_bridge":
-                self._run_task2_bridge(goal_handle)
-            elif task_id == "task3_knob":
-                self._run_task3_knob(goal_handle)
-            else:
+            handler = task_handlers.get(task_id)
+            if handler is None:
                 raise RuntimeError(f"Unknown task_id: {task_id}")
+            handler(goal_handle)
         except MissionCanceled as exc:
             goal_handle.canceled()
             result.success = False
@@ -142,7 +154,7 @@ class MissionTaskNode(Node):
     def _run_task1_bear(self, goal_handle):
         self._prepare_mission_start_pose()
         servo_cfg = self.config.get("visual_servo", {})
-        max_recoveries = int(servo_cfg.get("bear_recovery_max_attempts", 2))
+        max_recoveries = int(servo_cfg.get("bear_recovery_max_attempts", 5))
         recovery_count = 0
 
         while True:
@@ -210,13 +222,6 @@ class MissionTaskNode(Node):
             self._navigate(goal_handle, "door_inside")
         else:
             self._timed_drive(goal_handle, "enter_door", "FORWARD_SLOW", "door_enter_sec")
-
-    def _go_to_target(self, goal_handle, label, waypoint_name, phase):
-        if self._use_waypoints():
-            self._navigate(goal_handle, waypoint_name)
-        else:
-            self._set_target_label(label)
-            self._search_for_target(goal_handle, label, phase)
 
     def _approach_detected_target(self, goal_handle, label, phase, fallback_waypoint):
         self._check_cancel(goal_handle)
@@ -439,9 +444,7 @@ class MissionTaskNode(Node):
         self._navigate(goal_handle, "start")
 
     def _publish_goal_pose(self, msg):
-        for _ in range(3):
-            self.goal_pose_pub.publish(msg)
-            time.sleep(0.1)
+        self._publish_repeated(self.goal_pose_pub, msg)
 
     def _publish_waypoint(self, waypoint_name):
         waypoint = self.config["waypoints"][waypoint_name]
@@ -452,9 +455,7 @@ class MissionTaskNode(Node):
         msg.pose.position.y = float(waypoint["y"])
         msg.pose.position.z = float(waypoint.get("z", 0.0))
         msg.pose.orientation = self._quaternion_from_yaw(float(waypoint.get("yaw", 0.0)))
-        for _ in range(3):
-            self.goal_pose_pub.publish(msg)
-            time.sleep(0.1)
+        self._publish_repeated(self.goal_pose_pub, msg)
         self.get_logger().info(
             f"Published waypoint {waypoint_name}: "
             f"({msg.pose.position.x:.2f}, {msg.pose.position.y:.2f})"
@@ -474,48 +475,10 @@ class MissionTaskNode(Node):
         msg.pose.pose.orientation = self._quaternion_from_yaw(
             float(initial_pose_cfg.get("yaw", 0.0))
         )
-        msg.pose.covariance = [
-            0.25,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.25,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            float(initial_pose_cfg.get("yaw_covariance", 0.0685)),
-        ]
+        msg.pose.covariance = list(INITIAL_POSE_COVARIANCE)
+        msg.pose.covariance[35] = float(initial_pose_cfg.get("yaw_covariance", 0.0685))
 
-        for _ in range(3):
-            self.initial_pose_pub.publish(msg)
-            time.sleep(0.1)
+        self._publish_repeated(self.initial_pose_pub, msg)
         time.sleep(float(initial_pose_cfg.get("settle_sec", 3.0)))
         self.get_logger().info(
             "Published initial pose: "
@@ -536,9 +499,7 @@ class MissionTaskNode(Node):
     def _set_target_label(self, label):
         msg = String()
         msg.data = label
-        for _ in range(3):
-            self.target_label_pub.publish(msg)
-            time.sleep(0.1)
+        self._publish_repeated(self.target_label_pub, msg)
         self.get_logger().info(f"Set YOLO target label: {label}")
 
     def _visual_servo(
@@ -652,32 +613,6 @@ class MissionTaskNode(Node):
             time.sleep(0.1)
         self._publish_control("STOP")
 
-    def _turn_left_until_confident_bear(self, goal_handle):
-        servo_cfg = self.config.get("visual_servo", {})
-        min_conf = float(servo_cfg.get("bear_candidate_min_confidence", 0.9))
-        timeout = float(servo_cfg.get("search_timeout_sec", 45.0))
-
-        self._publish_phase(goal_handle, "find_confident_bear:left")
-        start = time.monotonic()
-        while time.monotonic() - start < timeout:
-            self._check_cancel(goal_handle)
-            detection = self._best_detection("bear")
-            if detection is not None and detection["confidence"] >= min_conf:
-                self._publish_control("STOP")
-                self.get_logger().info(
-                    "Found confident bear: "
-                    f"confidence={detection['confidence']:.3f} "
-                    f"offset_flu={detection['offset_flu']}"
-                )
-                return
-            self._publish_control("COUNTERCLOCKWISE_ROTATION_SLOW")
-            time.sleep(0.1)
-
-        self._publish_control("STOP")
-        raise RuntimeError(
-            f"Timed out before finding bear confidence >= {min_conf:.2f}"
-        )
-
     def _best_detection(self, label):
         return select_detection(self.object_detections, label)
 
@@ -735,6 +670,12 @@ class MissionTaskNode(Node):
         self.rear_wheel_pub.publish(rear_msg)
         self._last_control_action = action
         self._log_control_publish(action, vel[0:2], vel[2:4])
+
+    @staticmethod
+    def _publish_repeated(publisher, msg, count=3, interval=0.1):
+        for _ in range(count):
+            publisher.publish(msg)
+            time.sleep(interval)
 
     def _log_control_publish(self, action, front_vel, rear_vel):
         now = time.monotonic()

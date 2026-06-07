@@ -11,6 +11,11 @@ def _clamp(value, lower, upper):
     return max(lower, min(value, upper))
 
 
+GRIPPER_JOINT_INDICES = (2, 3)
+GRIPPER_OPEN_ANGLE = 50.0
+GRIPPER_CLOSED_ANGLE = 10.0
+
+
 class ArmAutoController:
     def __init__(
         self, arm_params, arm_commute_node, pybulletRobotController, arm_agnle_control
@@ -57,8 +62,7 @@ class ArmAutoController:
         self.arm_commute_node.publish_arm_angle()
         time.sleep(0.5)
 
-        self.arm_agnle_control.arm_index_change(4, 70.0)
-        self.arm_commute_node.publish_arm_angle()
+        self.open_gripper()
         time.sleep(0.5)
 
         self.init_pose(grap=False)
@@ -90,14 +94,11 @@ class ArmAutoController:
         # motion deterministic here instead of running follow_obj() side shifts.
         grasp_pose = self.arm_params.get("poses", {}).get("grasp", {})
         joints_count = int(self.arm_params["global"]["joints_count"])
-        gripper_open_angle = float(
-            self.arm_params["joints"][4].get("max_angle", 70.0)
-        )
         pre_grasp_angles = []
         for joint_idx in range(joints_count):
             fallback_angle = self.arm_agnle_control.get_arm_angles()[joint_idx]
             pre_grasp_angles.append(float(grasp_pose.get(joint_idx, fallback_angle)))
-        pre_grasp_angles[4] = gripper_open_angle
+        self._set_gripper_angles(pre_grasp_angles, GRIPPER_OPEN_ANGLE)
 
         self.arm_agnle_control.arm_all_change(pre_grasp_angles)
         self.arm_commute_node.publish_arm_angle()
@@ -123,45 +124,18 @@ class ArmAutoController:
             return ArmGoal.Result(success=False, message="Canceled by user")
 
         place_cfg = self.arm_params.get("place_bear", {})
-        release_publish_count = int(place_cfg.get("release_pose_publish_count", 10))
-        release_publish_period = float(
-            place_cfg.get("release_pose_publish_period_sec", 0.3)
-        )
-        release_settle_sec = float(place_cfg.get("release_pose_settle_sec", 2.0))
-        open_publish_count = int(place_cfg.get("gripper_open_publish_count", 5))
-        open_publish_period = float(
-            place_cfg.get("gripper_open_publish_period_sec", 0.3)
-        )
-        open_settle_sec = float(place_cfg.get("gripper_open_settle_sec", 1.0))
+        publish_count = int(place_cfg.get("pose_publish_count", 5))
+        publish_period = float(place_cfg.get("pose_publish_period_sec", 0.3))
+        settle_sec = float(place_cfg.get("pose_settle_sec", 1.0))
 
-        release_angles = self.arm_agnle_control.arm_pose_change("release")
-        joints_release_radians = [math.radians(angle) for angle in release_angles]
-        self.pybullet_robot_controller.setJointPosition(position=joints_release_radians)
-        for _ in range(release_publish_count):
-            if should_cancel():
-                return ArmGoal.Result(success=False, message="Canceled by user")
-            self.arm_commute_node.publish_arm_angle()
-            time.sleep(release_publish_period)
-        if release_settle_sec > 0.0:
-            time.sleep(release_settle_sec)
-            if should_cancel():
-                return ArmGoal.Result(success=False, message="Canceled by user")
-
-        gripper_open_angle = float(
-            self.arm_params["joints"][4].get("max_angle", 70.0)
-        )
-        self.arm_agnle_control.arm_index_change(4, gripper_open_angle)
-        release_angles = self.arm_agnle_control.get_arm_angles()
-        joints_release_radians = [math.radians(angle) for angle in release_angles]
-        self.pybullet_robot_controller.setJointPosition(position=joints_release_radians)
-        for _ in range(open_publish_count):
-            if should_cancel():
-                return ArmGoal.Result(success=False, message="Canceled by user")
-            self.arm_commute_node.publish_arm_angle()
-            time.sleep(open_publish_period)
-        if open_settle_sec > 0.0:
-            time.sleep(open_settle_sec)
-            if should_cancel():
+        for pose_name in ("grasp", "lift", "initial"):
+            if not self._move_to_pose(
+                pose_name,
+                publish_count,
+                publish_period,
+                settle_sec,
+                should_cancel,
+            ):
                 return ArmGoal.Result(success=False, message="Canceled by user")
         return ArmGoal.Result(success=True, message="bear placed")
 
@@ -314,8 +288,7 @@ class ArmAutoController:
                 for qstep in traj:   # qstep 應該就是「整組關節弧度」
                     self.move_real_and_virtual(radian=qstep)
                     time.sleep(0.3)
-                self.arm_agnle_control.arm_index_change(4, 70)
-                self.arm_commute_node.publish_arm_angle()
+                self.open_gripper()
                 self.arm_commute_node.clear_arucode_signal()  # 清除信號，避免重複讀取
                 break
 
@@ -391,18 +364,53 @@ class ArmAutoController:
             )
             return []  # Or raise an error
 
+    def _set_gripper_angles(self, angles, angle):
+        for joint_idx in GRIPPER_JOINT_INDICES:
+            if joint_idx < len(angles):
+                angles[joint_idx] = angle
+
+    def _move_to_pose(
+        self,
+        pose_name,
+        publish_count,
+        publish_period,
+        settle_sec,
+        should_cancel=lambda: False,
+    ):
+        angles = self.arm_agnle_control.arm_pose_change(pose_name)
+        radians = [math.radians(angle) for angle in angles]
+        self.pybullet_robot_controller.setJointPosition(position=radians)
+        for _ in range(publish_count):
+            if should_cancel():
+                return False
+            self.arm_commute_node.publish_arm_angle()
+            time.sleep(publish_period)
+        if settle_sec > 0.0:
+            time.sleep(settle_sec)
+            if should_cancel():
+                return False
+        return True
+
+    def open_gripper(self):
+        for joint_idx in GRIPPER_JOINT_INDICES:
+            self.arm_agnle_control.arm_index_change(joint_idx, GRIPPER_OPEN_ANGLE)
+        self.arm_commute_node.publish_arm_angle()
+
     def grap(self):
-        grasp_angle = self.arm_params.get("poses", {}).get("grasp", {}).get(4, 10.0)
-        self.arm_agnle_control.arm_index_change(4, float(grasp_angle))
+        for joint_idx in GRIPPER_JOINT_INDICES:
+            self.arm_agnle_control.arm_index_change(joint_idx, GRIPPER_CLOSED_ANGLE)
         self.arm_commute_node.publish_arm_angle()
 
     def init_pose(self, grap=False):
         angle = self.arm_agnle_control.arm_default_change()
         if grap:
-            grasp_angle = self.arm_params.get("poses", {}).get("grasp", {}).get(4, 10.0)
-            self.arm_agnle_control.arm_index_change(4, float(grasp_angle))
+            for joint_idx in GRIPPER_JOINT_INDICES:
+                self.arm_agnle_control.arm_index_change(
+                    joint_idx, GRIPPER_CLOSED_ANGLE
+            )
             self.arm_commute_node.publish_arm_angle()
             time.sleep(1.0)
+            angle = self.arm_agnle_control.get_arm_angles()
         self.arm_commute_node.publish_arm_angle()
         joints_reset_degrees = angle
         joints_reset_radians = [math.radians(angle) for angle in joints_reset_degrees]

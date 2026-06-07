@@ -29,34 +29,33 @@ joints:
     min_angle: 0.0
     max_angle: 70.0
 poses:
+  # Gripper uses joints 2 and 3: 50.0/50.0 is open, 0.0/0.0 is closed.
+  # Joint 4 is not used by the gripper; keep it at 0.0 in named poses.
   initial:
     0: 130.0
     1: 95.0
     2: 50.0
     3: 50.0
-    4: 50.0
+    4: 0.0
   grasp:
     0: 130.0
     1: 95.0
-    2: 0.0
-    3: 0.0
+    2: 30.0
+    3: 30.0
     4: 0.0
-  release:
+  lift:
     0: 70.0
     1: 95.0
     2: 50.0
     3: 50.0
-    4: 50.0
+    4: 0.0
 joints_reset:
   0: 90.0
   1: 30.0
   2: 30.0
   3: 180.0
-  4: 30.0
+  4: 0.0
 place_bear:
-  release_pose_publish_count: 10
-  release_pose_publish_period_sec: 0.3
-  release_pose_settle_sec: 2.0
-  gripper_open_publish_count: 5
-  gripper_open_publish_period_sec: 0.3
-  gripper_open_settle_sec: 1.0
+  pose_publish_count: 5
+  pose_publish_period_sec: 0.3
+  pose_settle_sec: 1.0

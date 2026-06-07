@@ -55,22 +55,22 @@ dynamic_approach:
   detection_timeout_sec: 45.0
   amcl_settle_before_detection_sec:
     default: 0.0
-    bear: 3.0
+    bear: 1.0
   fallback_to_waypoint: true
   min_confidence:
     default: 0.0
     bear: 0.92
   standoff_m:
     default: 0.5
-    bear: 0.35
+    bear: 0.5
     knob: 0.5
     bridge: 1.0
   short_hop:
     default:
       enabled: false
       max_hops: 5
-      step_distance_m: 1.0
-      goal_tolerance_m: 0.15
+      step_distance_m: 1.5
+      goal_tolerance_m: 0.1
       detection_refresh_timeout_sec: 20.0
     bear:
       enabled: true
@@ -84,8 +84,8 @@ visual_servo:
   aligned_settle_sec: 3.0
   timeout_sec: 100.0
   search_timeout_sec: 100.0
-  bear_recovery_depth_m: 0.75
-  bear_recovery_max_attempts: 2
+  bear_recovery_depth_m: 0.8
+  bear_recovery_max_attempts: 5
   bear_candidate_min_confidence: 0.92
   bridge_cross_sec: 4.0
   door_enter_sec: 2.0

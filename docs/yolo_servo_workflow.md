@@ -56,10 +56,7 @@ cd workspace/pros/ros2_yolo_integration
 ./yolo_activate.sh --task yolo_mode:=1 enable_arucode:=false
 ```
 
-```bashcd /workspaces
-source /opt/ros/${ROS_DISTRO:-humble}/setup.bash
-source install/setup.bash
-ros2 run mission_task_pkg mission_task_client task1_bear
+```bash
 docker exec -it pros_car bash   
 
 ```
