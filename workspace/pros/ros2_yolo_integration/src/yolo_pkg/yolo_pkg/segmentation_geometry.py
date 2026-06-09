@@ -72,6 +72,71 @@ def sample_mask_band_depth(depth_image, mask, points_yx, band_name):
     return float(np.median(valid))
 
 
+def sample_point_depth(depth_image, center_px, radius_px=2, fallback_depth=None):
+    if depth_image is None or not isinstance(depth_image, np.ndarray):
+        return fallback_depth
+    center_x, center_y = center_px
+    height, width = depth_image.shape[:2]
+    x = int(round(center_x))
+    y = int(round(center_y))
+    radius_px = max(0, int(radius_px))
+    x_min = max(0, x - radius_px)
+    x_max = min(width, x + radius_px + 1)
+    y_min = max(0, y - radius_px)
+    y_max = min(height, y + radius_px + 1)
+    if x_min >= x_max or y_min >= y_max:
+        return fallback_depth
+
+    values = depth_image[y_min:y_max, x_min:x_max]
+    valid = values[(values > 0) & (~np.isnan(values))]
+    if valid.size == 0:
+        return fallback_depth
+    return float(np.median(valid))
+
+
+def estimate_mask_quadrilateral(points_yx):
+    points_xy = np.column_stack((points_yx[:, 1], points_yx[:, 0])).astype(float)
+    sums = points_xy[:, 0] + points_xy[:, 1]
+    diffs = points_xy[:, 0] - points_xy[:, 1]
+
+    top_left = points_xy[int(np.argmin(sums))]
+    top_right = points_xy[int(np.argmax(diffs))]
+    bottom_right = points_xy[int(np.argmax(sums))]
+    bottom_left = points_xy[int(np.argmin(diffs))]
+    return [
+        top_left.tolist(),
+        top_right.tolist(),
+        bottom_right.tolist(),
+        bottom_left.tolist(),
+    ]
+
+
+def _edge_with_lowest_z(corner_offsets):
+    edges = [(0, 1), (1, 2), (2, 3), (3, 0)]
+    return min(
+        edges,
+        key=lambda edge: _average_offset(
+            corner_offsets[edge[0]],
+            corner_offsets[edge[1]],
+        )[2],
+    )
+
+
+def _average_offset(offset_a, offset_b):
+    return [
+        round((float(offset_a[0]) + float(offset_b[0])) / 2.0, 3),
+        round((float(offset_a[1]) + float(offset_b[1])) / 2.0, 3),
+        round((float(offset_a[2]) + float(offset_b[2])) / 2.0, 3),
+    ]
+
+
+def _average_point(point_a, point_b):
+    return [
+        float((point_a[0] + point_b[0]) / 2.0),
+        float((point_a[1] + point_b[1]) / 2.0),
+    ]
+
+
 def calculate_offset_flu(center_px, depth, intrinsics):
     center_x, center_y = center_px
     fx = float(intrinsics["fx"])
@@ -90,59 +155,67 @@ def estimate_bridge_model(mask, depth_image, intrinsics):
     if points_yx.size == 0:
         return None
 
-    ys = points_yx[:, 0]
-    height_px = int(ys.max() - ys.min() + 1)
-    band_px = max(2, int(round(height_px * 0.08)))
-
-    top_y = float(np.percentile(ys, 10))
-    bottom_y = float(np.percentile(ys, 90))
-    top_points = points_yx[ys <= top_y + band_px]
-    bottom_points = points_yx[ys >= bottom_y - band_px]
-    if top_points.size == 0 or bottom_points.size == 0:
-        return None
-
-    top_left = [float(top_points[:, 1].min()), float(np.median(top_points[:, 0]))]
-    top_right = [float(top_points[:, 1].max()), float(np.median(top_points[:, 0]))]
-    bottom_left = [
-        float(bottom_points[:, 1].min()),
-        float(np.median(bottom_points[:, 0])),
-    ]
-    bottom_right = [
-        float(bottom_points[:, 1].max()),
-        float(np.median(bottom_points[:, 0])),
-    ]
-    ground_contact_center_px = [
-        float(np.mean(bottom_points[:, 1])),
-        float(np.median(bottom_points[:, 0])),
-    ]
-
+    corners_px = estimate_mask_quadrilateral(points_yx)
     ground_depth = sample_mask_band_depth(depth_image, mask, points_yx, "lower")
     if ground_depth is None or ground_depth <= 0.0:
         return None
+    upper_depth = sample_mask_band_depth(depth_image, mask, points_yx, "upper")
 
-    top_width_px = top_right[0] - top_left[0]
-    bottom_width_px = bottom_right[0] - bottom_left[0]
-    model = {
-        "type": "trapezoidal_prism",
-        "visible_face": "lateral",
-        "lateral_face_corners_px": [
-            _round_point(top_left),
-            _round_point(top_right),
-            _round_point(bottom_right),
-            _round_point(bottom_left),
+    corner_fallback_depths = [
+        upper_depth or ground_depth,
+        upper_depth or ground_depth,
+        ground_depth,
+        ground_depth,
+    ]
+    corner_depths = [
+        sample_point_depth(
+            depth_image,
+            corner_px,
+            fallback_depth=fallback_depth,
+        )
+        for corner_px, fallback_depth in zip(corners_px, corner_fallback_depths)
+    ]
+    corner_offsets = [
+        calculate_offset_flu(corner_px, depth, intrinsics)
+        for corner_px, depth in zip(corners_px, corner_depths)
+        if depth is not None and depth > 0.0
+    ]
+    if len(corner_offsets) != 4:
+        return None
+
+    ground_edge = _edge_with_lowest_z(corner_offsets)
+    ground_contact_center_px = _average_point(
+        corners_px[ground_edge[0]],
+        corners_px[ground_edge[1]],
+    )
+    ground_contact_offset = _average_offset(
+        corner_offsets[ground_edge[0]],
+        corner_offsets[ground_edge[1]],
+    )
+    ground_depth = (
+        corner_depths[ground_edge[0]] + corner_depths[ground_edge[1]]
+    ) / 2.0
+
+    return {
+        "type": "quadrilateral",
+        "visible_face": "mask_outline",
+        "lateral_face_corners_px": [_round_point(corner) for corner in corners_px],
+        "lateral_face_corner_depths_m": [
+            round(float(depth), 3) for depth in corner_depths
+        ],
+        "ground_edge_corners_px": [
+            _round_point(corners_px[ground_edge[0]]),
+            _round_point(corners_px[ground_edge[1]]),
         ],
         "ground_contact_center_px": _round_point(ground_contact_center_px),
         "ground_contact_depth_m": round(float(ground_depth), 3),
-        "ground_contact_offset_flu": calculate_offset_flu(
-            ground_contact_center_px,
-            ground_depth,
-            intrinsics,
-        ),
-        "top_width_px": round(float(top_width_px), 3),
-        "bottom_width_px": round(float(bottom_width_px), 3),
-        "height_px": height_px,
+        "ground_contact_offset_flu": ground_contact_offset,
+        "lateral_face_corners_flu": corner_offsets,
+        "ground_edge_corners_flu": [
+            corner_offsets[ground_edge[0]],
+            corner_offsets[ground_edge[1]],
+        ],
     }
-    return model
 
 
 def build_segmentation_offset(segmentation_obj, depth_image, intrinsics):

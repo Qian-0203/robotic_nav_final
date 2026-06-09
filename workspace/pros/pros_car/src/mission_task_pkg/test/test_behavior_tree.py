@@ -47,9 +47,12 @@ class BehaviorTreeRunnerTest(unittest.TestCase):
 
         types = runner.flatten_types("task2_bridge")
 
+        self.assertIn("ApproachBridgePreAlign", types)
         self.assertIn("AlignBridgeOrientation", types)
         self.assertIn("TimedDrive", types)
         self.assertIn("ReturnToStart", types)
+        self.assertLess(types.index("WaitDetection"), types.index("ApproachBridgePreAlign"))
+        self.assertLess(types.index("ApproachBridgePreAlign"), types.index("VisualServo"))
         self.assertLess(types.index("AlignBridgeOrientation"), types.index("ArmGoal"))
 
     def test_task3_tree_uses_fixed_waypoints_before_knob_servo(self):
@@ -72,6 +75,9 @@ class BehaviorTreeRunnerTest(unittest.TestCase):
 
         bear_short_hop = config["dynamic_approach"]["short_hop"]["bear"]
         self.assertEqual(bear_short_hop["detection_refresh_timeout_sec"], 5.0)
+
+        bridge_settle = config["dynamic_approach"]["amcl_settle_before_detection_sec"]
+        self.assertEqual(bridge_settle["bridge"], 1.0)
 
 
 def _load_mission_trees():

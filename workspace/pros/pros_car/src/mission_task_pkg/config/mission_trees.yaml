@@ -29,6 +29,9 @@ task2_bridge:
     - type: WaitDetection
       label: bridge
       phase: wait_bridge_segmentation
+    - type: ApproachBridgePreAlign
+      label: bridge
+      phase: approach_bridge_y_offset
     - type: VisualServo
       label: bridge
       phase: align_bridge_center

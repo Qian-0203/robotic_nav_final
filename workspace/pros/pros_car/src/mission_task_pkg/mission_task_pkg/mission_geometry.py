@@ -21,36 +21,7 @@ def yaw_from_quaternion(quat):
         x, y, z, w = quat
     siny_cosp = 2.0 * (w * z + x * y)
     cosy_cosp = 1.0 - 2.0 * (y * y + z * z)
-   Default logging verbosity is set to INFO
-[INFO] [car_control_node-1]: process started with pid [1573]
-[INFO] [arm_control_node-2]: process started with pid [1575]
-[INFO] [unity_arm_republish_node-3]: process started with pid [1577]
-[INFO] [mission_task_node-4]: process started with pid [1579]
-[mission_task_node-4] Traceback (most recent call last):
-[mission_task_node-4]   File "/workspaces/install/mission_task_pkg/lib/mission_task_pkg/mission_task_node", line 33, in <module>
-[mission_task_node-4]     sys.exit(load_entry_point('mission-task-pkg', 'console_scripts', 'mission_task_node')())
-[mission_task_node-4]   File "/workspaces/install/mission_task_pkg/lib/mission_task_pkg/mission_task_node", line 25, in importlib_load_entry_point
-[mission_task_node-4]     return next(matches).load()
-[mission_task_node-4]   File "/usr/lib/python3.10/importlib/metadata/__init__.py", line 171, in load
-[mission_task_node-4]     module = import_module(match.group('module'))
-[mission_task_node-4]   File "/usr/lib/python3.10/importlib/__init__.py", line 126, in import_module
-[mission_task_node-4]     return _bootstrap._gcd_import(name[level:], package, level)
-[mission_task_node-4]   File "<frozen importlib._bootstrap>", line 1050, in _gcd_import
-[mission_task_node-4]   File "<frozen importlib._bootstrap>", line 1027, in _find_and_load
-[mission_task_node-4]   File "<frozen importlib._bootstrap>", line 1006, in _find_and_load_unlocked
-[mission_task_node-4]   File "<frozen importlib._bootstrap>", line 688, in _load_unlocked
-[mission_task_node-4]   File "<frozen importlib._bootstrap_external>", line 879, in exec_module
-[mission_task_node-4]   File "<frozen importlib._bootstrap_external>", line 1017, in get_code
-[mission_task_node-4]   File "<frozen importlib._bootstrap_external>", line 947, in source_to_code
-[mission_task_node-4]   File "<frozen importlib._bootstrap>", line 241, in _call_with_frames_removed
-[mission_task_node-4]   File "/workspaces/build/mission_task_pkg/mission_task_pkg/mission_task_node.py", line 621
-[mission_task_node-4]     action = "FORWARD_SLOW"target_depth_m
-[mission_task_node-4]                            ^^^^^^^^^^^^^^
-[mission_task_node-4] SyntaxError: invalid syntax
-[ERROR] [mission_task_node-4]: process has died [pid 1579, exit code 1, cmd '/workspaces/install/mission_task_pkg/lib/mission_task_pkg/mission_task_node --ros-args -r __node:=mission_task_node --params-file /tmp/launch_params_e97oszs7'].
-[unity_arm_republish_node-3] [INFO] [1781016102.295140581] [unity_arm_republish_node]: Relaying JointTrajectoryPoint: /robot_arm_tmp  ->  /robot_arm
-[arm_control_node-2] pybullet build time: Nov 28 2023 23:45:17
-  return math.atan2(siny_cosp, cosy_cosp)
+    return math.atan2(siny_cosp, cosy_cosp)
 
 
 def snap_angle_to_axis(angle, axes=None):

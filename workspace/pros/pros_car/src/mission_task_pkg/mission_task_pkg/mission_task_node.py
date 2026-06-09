@@ -180,6 +180,7 @@ class MissionTaskNode(Node):
             dynamic_cfg = self.config.get("dynamic_approach", {})
             phase = node.get("phase", f"wait_{label}")
             self._publish_phase(goal_handle, phase)
+            self._settle_before_detection(goal_handle, label, dynamic_cfg)
             self._wait_for_detection(goal_handle, label, dynamic_cfg)
             return
         if node_type == "NavigateWaypoint":
@@ -201,6 +202,13 @@ class MissionTaskNode(Node):
                 target_depth=node.get("target_depth"),
                 timeout_sec=node.get("timeout_sec"),
                 allow_missing=bool(node.get("allow_missing", False)),
+            )
+            return
+        if node_type == "ApproachBridgePreAlign":
+            self._approach_bridge_pre_align(
+                goal_handle,
+                node.get("label", "bridge"),
+                node.get("phase", "approach_bridge_y_offset"),
             )
             return
         if node_type == "AlignBridgeOrientation":
@@ -652,6 +660,130 @@ class MissionTaskNode(Node):
         self._publish_control("STOP")
         raise RuntimeError(f"Timed out while searching for {label}")
 
+    def _approach_bridge_pre_align(self, goal_handle, label, phase):
+        self._check_cancel(goal_handle)
+        self._publish_phase(goal_handle, phase)
+        if self.latest_amcl_pose is None:
+            raise RuntimeError("missing /amcl_pose")
+
+        detection = self._best_full_detection(label)
+        if detection is None:
+            raise RuntimeError(f"missing full {label} detection")
+
+        offset_m = float(
+            self.config.get("visual_servo", {}).get(
+                "bridge_pre_align_y_offset_m",
+                0.5,
+            )
+        )
+        goal_pose = self._build_bridge_pre_align_goal_pose(detection, offset_m)
+        self._publish_goal_pose(goal_pose)
+        self._send_nav_goal(goal_handle, "Manual_Nav")
+
+    def _build_bridge_pre_align_goal_pose(self, detection, offset_m):
+        bridge_offset = self._bridge_detection_offset(detection)
+        bridge_y_axis = self._bridge_tf_y_axis_flu(detection)
+        if bridge_offset is None:
+            raise RuntimeError("bridge detection missing ground-contact offset")
+        if bridge_y_axis is None:
+            raise RuntimeError("bridge detection missing ground-edge orientation")
+
+        target_offset = [
+            float(bridge_offset[0]) + bridge_y_axis[0] * offset_m,
+            float(bridge_offset[1]) + bridge_y_axis[1] * offset_m,
+            0.0,
+        ]
+        pose = self.latest_amcl_pose.pose.pose
+        robot_yaw = yaw_from_quaternion(pose.orientation)
+        goal_x, goal_y = self._offset_flu_to_map_xy(
+            pose.position.x,
+            pose.position.y,
+            robot_yaw,
+            target_offset,
+        )
+        heading_x, heading_y = self._vector_flu_to_map_xy(robot_yaw, bridge_y_axis)
+        goal_yaw = math.atan2(heading_y, heading_x)
+        self.get_logger().info(
+            "Bridge pre-align determined: "
+            f"bridge_offset_flu={bridge_offset} "
+            f"bridge_y_axis_flu={[round(v, 3) for v in bridge_y_axis]} "
+            f"offset_y={offset_m:.3f} "
+            f"goal_map=({goal_x:.3f}, {goal_y:.3f}) "
+            f"goal_yaw={goal_yaw:.3f}"
+        )
+
+        msg = PoseStamped()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = self.latest_amcl_pose.header.frame_id or "map"
+        msg.pose.position.x = goal_x
+        msg.pose.position.y = goal_y
+        msg.pose.position.z = 0.0
+        msg.pose.orientation = self._quaternion_from_yaw(goal_yaw)
+        return msg
+
+    @staticmethod
+    def _bridge_detection_offset(detection):
+        bridge_model = detection.get("bridge_model")
+        if isinstance(bridge_model, dict):
+            offset = bridge_model.get("ground_contact_offset_flu")
+            if isinstance(offset, list) and len(offset) == 3:
+                return [float(value) for value in offset]
+        offset = detection.get("offset_flu")
+        if isinstance(offset, list) and len(offset) == 3:
+            return [float(value) for value in offset]
+        return None
+
+    @staticmethod
+    def _bridge_tf_y_axis_flu(detection):
+        bridge_model = detection.get("bridge_model")
+        if not isinstance(bridge_model, dict):
+            return None
+        corners = bridge_model.get("ground_edge_corners_flu")
+        if not isinstance(corners, list) or len(corners) != 2:
+            return None
+        try:
+            start = [float(value) for value in corners[0]]
+            end = [float(value) for value in corners[1]]
+        except (TypeError, ValueError):
+            return None
+        if len(start) != 3 or len(end) != 3:
+            return None
+
+        # YOLO publishes bridge TF in the visualization convention:
+        # x=-forward, y=-left. Its +Y axis is the left-normal of the ground edge.
+        edge_x = -end[0] - (-start[0])
+        edge_y = -end[1] - (-start[1])
+        length = math.hypot(edge_x, edge_y)
+        if length <= 1e-6:
+            return None
+        y_axis_viz = [-edge_y / length, edge_x / length]
+        return [-y_axis_viz[0], -y_axis_viz[1], 0.0]
+
+    def _bridge_y_axis_alignment_error(self, detection):
+        bridge_y_axis = self._bridge_tf_y_axis_flu(detection)
+        if bridge_y_axis is None:
+            return None
+        forward, left, _up = bridge_y_axis
+        if math.hypot(forward, left) <= 1e-6:
+            return None
+        return math.atan2(left, forward)
+
+    @staticmethod
+    def _offset_flu_to_map_xy(robot_x, robot_y, robot_yaw, offset_flu):
+        forward, left, _up = offset_flu
+        return (
+            robot_x + forward * math.cos(robot_yaw) - left * math.sin(robot_yaw),
+            robot_y + forward * math.sin(robot_yaw) + left * math.cos(robot_yaw),
+        )
+
+    @staticmethod
+    def _vector_flu_to_map_xy(robot_yaw, vector_flu):
+        forward, left, _up = vector_flu
+        return (
+            forward * math.cos(robot_yaw) - left * math.sin(robot_yaw),
+            forward * math.sin(robot_yaw) + left * math.cos(robot_yaw),
+        )
+
     def _timed_drive(self, goal_handle, phase, action, config_key):
         servo_cfg = self.config.get("visual_servo", {})
         duration = float(servo_cfg.get(config_key, 2.0))
@@ -694,21 +826,32 @@ class MissionTaskNode(Node):
                 self._publish_control("CLOCKWISE_ROTATION_SLOW")
                 time.sleep(command_period)
                 continue
-            angle = detection.get("mask_angle_rad")
-            try:
-                angle = float(angle)
-            except (TypeError, ValueError):
-                self._publish_control("CLOCKWISE_ROTATION_SLOW")
-                time.sleep(command_period)
-                continue
+            yaw_error = self._bridge_y_axis_alignment_error(detection)
+            if yaw_error is None:
+                angle = detection.get("mask_angle_rad")
+                try:
+                    angle = float(angle)
+                except (TypeError, ValueError):
+                    self._publish_control("CLOCKWISE_ROTATION_SLOW")
+                    time.sleep(command_period)
+                    continue
 
-            robot_yaw = yaw_from_quaternion(self.latest_amcl_pose.pose.pose.orientation)
-            yaw_error, snapped_heading = bridge_axis_alignment_error(robot_yaw, angle)
-            self.get_logger().info(
-                f"Bridge orientation: image_angle={angle:.3f} "
-                f"robot_yaw={robot_yaw:.3f} snapped_axis={snapped_heading:.3f} "
-                f"yaw_error={yaw_error:.3f}"
-            )
+                robot_yaw = yaw_from_quaternion(
+                    self.latest_amcl_pose.pose.pose.orientation
+                )
+                yaw_error, snapped_heading = bridge_axis_alignment_error(
+                    robot_yaw,
+                    angle,
+                )
+                self.get_logger().info(
+                    f"Bridge orientation fallback: image_angle={angle:.3f} "
+                    f"robot_yaw={robot_yaw:.3f} snapped_axis={snapped_heading:.3f} "
+                    f"yaw_error={yaw_error:.3f}"
+                )
+            else:
+                self.get_logger().info(
+                    f"Bridge +Y to base +X yaw_error={yaw_error:.3f}"
+                )
 
             if abs(yaw_error) <= angle_tol:
                 self._publish_control("STOP")

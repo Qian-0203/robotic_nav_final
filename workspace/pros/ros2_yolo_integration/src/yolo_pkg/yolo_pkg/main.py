@@ -181,14 +181,17 @@ def _publish_bridge_tf(ros_communicator, offsets_3d_json):
     try:
         offsets = json.loads(offsets_3d_json)
     except (TypeError, json.JSONDecodeError):
+        _set_bridge_tf_active(ros_communicator, False)
         return
 
     detection = _select_bridge_detection(offsets)
     if detection is None:
+        _set_bridge_tf_active(ros_communicator, False)
         return
 
     offset = _bridge_detection_offset(detection)
     if offset is None:
+        _set_bridge_tf_active(ros_communicator, False)
         return
 
     transform = TransformStamped()
@@ -203,10 +206,47 @@ def _publish_bridge_tf(ros_communicator, offsets_3d_json):
     transform.transform.translation.y = -float(offset[1])
     transform.transform.translation.z = float(offset[2])
 
-    yaw = float(detection.get("mask_angle_rad", 0.0))
+    yaw = _bridge_ground_edge_yaw(detection)
+    if yaw is None:
+        yaw = float(detection.get("mask_angle_rad", 0.0))
     transform.transform.rotation.z = math.sin(yaw / 2.0)
     transform.transform.rotation.w = math.cos(yaw / 2.0)
     ros_communicator.publish_transform(transform)
+    _set_bridge_tf_active(ros_communicator, True)
+    _log_bridge_tf(ros_communicator, transform, yaw, detection)
+
+
+def _set_bridge_tf_active(ros_communicator, active):
+    previous = getattr(_set_bridge_tf_active, "_active", None)
+    if previous == active:
+        return
+    _set_bridge_tf_active._active = active
+    child_frame = str(ros_communicator.get_parameter("bridge_tf_child_frame_id").value)
+    if active:
+        ros_communicator.get_logger().info(f"Publishing bridge TF: {child_frame}")
+    else:
+        ros_communicator.get_logger().info(
+            f"Bridge not detected; stopped updating TF: {child_frame}"
+        )
+
+
+def _log_bridge_tf(ros_communicator, transform, yaw, detection):
+    now = time.monotonic()
+    last_log = getattr(_log_bridge_tf, "_last_log", 0.0)
+    if now - last_log < 1.0:
+        return
+    _log_bridge_tf._last_log = now
+
+    bridge_model = detection.get("bridge_model", {})
+    ground_edge = bridge_model.get("ground_edge_corners_flu")
+    ros_communicator.get_logger().info(
+        "Bridge TF determined: "
+        f"parent={transform.header.frame_id} child={transform.child_frame_id} "
+        f"xyz=({transform.transform.translation.x:.3f}, "
+        f"{transform.transform.translation.y:.3f}, "
+        f"{transform.transform.translation.z:.3f}) "
+        f"yaw={yaw:.3f} ground_edge_flu={ground_edge}"
+    )
 
 
 def _select_bridge_detection(offsets):
@@ -247,6 +287,31 @@ def _bridge_detection_offset(detection):
     if isinstance(offset, list) and len(offset) == 3:
         return offset
     return None
+
+
+def _bridge_ground_edge_yaw(detection):
+    bridge_model = detection.get("bridge_model")
+    if not isinstance(bridge_model, dict):
+        return None
+
+    corners = bridge_model.get("ground_edge_corners_flu")
+    if not isinstance(corners, list) or len(corners) != 2:
+        return None
+    try:
+        start = [float(value) for value in corners[0]]
+        end = [float(value) for value in corners[1]]
+    except (TypeError, ValueError):
+        return None
+    if len(start) != 3 or len(end) != 3:
+        return None
+
+    start_x, start_y = -start[0], -start[1]
+    end_x, end_y = -end[0], -end[1]
+    dx = end_x - start_x
+    dy = end_y - start_y
+    if abs(dx) < 1e-6 and abs(dy) < 1e-6:
+        return None
+    return math.atan2(dy, dx)
 
 
 if __name__ == "__main__":
