@@ -9,6 +9,7 @@ def generate_launch_description():
     enable_unity_arm_bridge = LaunchConfiguration("enable_unity_arm_bridge")
     enable_car_c_writer = LaunchConfiguration("enable_car_c_writer")
     waypoints_file = LaunchConfiguration("waypoints_file")
+    mission_trees_file = LaunchConfiguration("mission_trees_file")
 
     return LaunchDescription(
         [
@@ -32,6 +33,11 @@ def generate_launch_description():
                 "waypoints_file",
                 default_value="",
                 description="Optional path to mission_waypoints.yaml",
+            ),
+            DeclareLaunchArgument(
+                "mission_trees_file",
+                default_value="",
+                description="Optional path to mission_trees.yaml",
             ),
             Node(
                 package="car_control_pkg",
@@ -62,7 +68,12 @@ def generate_launch_description():
                 executable="mission_task_node",
                 name="mission_task_node",
                 output="screen",
-                parameters=[{"waypoints_file": waypoints_file}],
+                parameters=[
+                    {
+                        "waypoints_file": waypoints_file,
+                        "mission_trees_file": mission_trees_file,
+                    }
+                ],
             ),
         ]
     )

@@ -10,6 +10,7 @@ from action_interface.action import ArmGoal, MissionTask, NavGoal
 from ament_index_python.packages import get_package_share_directory
 from geometry_msgs.msg import PoseStamped, Quaternion
 from geometry_msgs.msg import PoseWithCovarianceStamped
+from mission_task_pkg.behavior_tree import BehaviorTreeRunner
 from mission_task_pkg.mission_geometry import compute_dynamic_goal, select_detection
 from rclpy.action import ActionClient, ActionServer, CancelResponse, GoalResponse
 from rclpy.executors import MultiThreadedExecutor
@@ -22,12 +23,11 @@ ACTION_MAPPINGS = {
     "COUNTERCLOCKWISE_ROTATION": [-300.0, 300.0, -300.0, 300.0],
     "CLOCKWISE_ROTATION": [300.0, -300.0, 300.0, -300.0],
     "FORWARD_SLOW": [100.0, 100.0, 100.0, 100.0],
+    "BACKWARD_SLOW": [-100.0, -100.0, -100.0, -100.0],
     "COUNTERCLOCKWISE_ROTATION_SLOW": [-230.0, 230.0, -230.0, 230.0],
     "CLOCKWISE_ROTATION_SLOW": [230.0, -230.0, 230.0, -230.0],
     "STOP": [0.0, 0.0, 0.0, 0.0],
 }
-
-VALID_TASK_IDS = {"task1_bear", "task2_bridge", "task3_knob"}
 
 INITIAL_POSE_COVARIANCE = [
     0.25, 0.0, 0.0, 0.0, 0.0, 0.0,
@@ -50,14 +50,16 @@ class MissionTaskNode(Node):
     def __init__(self):
         super().__init__("mission_task_node")
         self.declare_parameter("waypoints_file", "")
+        self.declare_parameter("mission_trees_file", "")
         self.config = self._load_config()
+        self.mission_trees = self._load_mission_trees()
+        self.bt_runner = BehaviorTreeRunner(self.mission_trees, self._run_bt_primitive)
 
         self.initial_pose_pub = self.create_publisher(
             PoseWithCovarianceStamped, "/initialpose", 10
         )
         self.goal_pose_pub = self.create_publisher(PoseStamped, "/goal_pose", 10)
         self.target_label_pub = self.create_publisher(String, "/target_label", 10)
-        self.chassis_signal_pub = self.create_publisher(String, "car_control_signal", 10)
         self.rear_wheel_pub = self.create_publisher(
             Float32MultiArray, "car_C_rear_wheel", 10
         )
@@ -109,8 +111,26 @@ class MissionTaskNode(Node):
         self.get_logger().info(f"Loaded mission config: {config_path}")
         return config
 
+    def _load_mission_trees(self):
+        param_path = self.get_parameter("mission_trees_file").value
+        if param_path:
+            config_path = param_path
+        else:
+            try:
+                share_dir = get_package_share_directory("mission_task_pkg")
+                config_path = os.path.join(share_dir, "config", "mission_trees.yaml")
+            except Exception:
+                here = os.path.dirname(os.path.dirname(__file__))
+                config_path = os.path.join(here, "config", "mission_trees.yaml")
+
+        with open(config_path, "r", encoding="utf-8") as f:
+            trees = yaml.safe_load(f) or {}
+
+        self.get_logger().info(f"Loaded mission behavior trees: {config_path}")
+        return trees
+
     def goal_callback(self, goal_request):
-        if goal_request.task_id not in VALID_TASK_IDS:
+        if goal_request.task_id not in self.bt_runner.task_ids():
             self.get_logger().error(f"Unknown task_id: {goal_request.task_id}")
             return GoalResponse.REJECT
         return GoalResponse.ACCEPT
@@ -123,16 +143,8 @@ class MissionTaskNode(Node):
     def execute_callback(self, goal_handle):
         task_id = goal_handle.request.task_id
         result = MissionTask.Result()
-        task_handlers = {
-            "task1_bear": self._run_task1_bear,
-            "task2_bridge": self._run_task2_bridge,
-            "task3_knob": self._run_task3_knob,
-        }
         try:
-            handler = task_handlers.get(task_id)
-            if handler is None:
-                raise RuntimeError(f"Unknown task_id: {task_id}")
-            handler(goal_handle)
+            self.bt_runner.run(task_id, goal_handle)
         except MissionCanceled as exc:
             goal_handle.canceled()
             result.success = False
@@ -151,77 +163,63 @@ class MissionTaskNode(Node):
         result.message = f"{task_id} completed"
         return result
 
-    def _run_task1_bear(self, goal_handle):
-        self._prepare_mission_start_pose()
-        servo_cfg = self.config.get("visual_servo", {})
-        max_recoveries = int(servo_cfg.get("bear_recovery_max_attempts", 5))
-        recovery_count = 0
-
-        while True:
-            phase = (
-                "approach_detected_bear"
-                if recovery_count == 0
-                else f"recover_bear_dynamic_approach:{recovery_count}"
-            )
+    def _run_bt_primitive(self, node_type, node, goal_handle):
+        if node_type == "PrepareMissionStartPose":
+            self._prepare_mission_start_pose()
+            return
+        if node_type == "SetTargetLabel":
+            self._set_target_label(node["label"])
+            return
+        if node_type == "WaitDetection":
+            label = node["label"]
+            dynamic_cfg = self.config.get("dynamic_approach", {})
+            phase = node.get("phase", f"wait_{label}")
+            self._publish_phase(goal_handle, phase)
+            self._wait_for_detection(goal_handle, label, dynamic_cfg)
+            return
+        if node_type == "NavigateWaypoint":
+            self._navigate(goal_handle, node["waypoint"])
+            return
+        if node_type == "ApproachDetectedTarget":
             self._approach_detected_target(
                 goal_handle,
-                "bear",
-                phase,
-                "bear_approach",
+                node["label"],
+                node.get("phase", f"approach_detected_{node['label']}"),
+                node["fallback_waypoint"],
             )
-            try:
-                self._visual_servo(goal_handle, "bear", "align_bear_for_pickup")
-                break
-            except VisualServoRecoveryNeeded as exc:
-                self._publish_control("STOP")
-                if recovery_count >= max_recoveries:
-                    raise RuntimeError(
-                        "Bear alignment recovery exceeded "
-                        f"{max_recoveries} attempt(s): depth={exc.depth:.3f} m "
-                        f"> threshold={exc.threshold:.3f} m"
-                    ) from exc
-                recovery_count += 1
-                self.get_logger().warn(
-                    "Bear depth exceeded recovery threshold during alignment; "
-                    f"rerunning dynamic approach "
-                    f"({recovery_count}/{max_recoveries})"
-                )
-
-        self._send_arm_goal(goal_handle, "pickup_bear")
-        self._return_to_start(goal_handle)
-        self._send_arm_goal(goal_handle, "place_bear")
-
-    def _run_task2_bridge(self, goal_handle):
-        self._prepare_mission_start_pose()
-        self._approach_detected_target(
-            goal_handle,
-            "bridge",
-            "approach_detected_bridge",
-            "bridge_entry",
-        )
-        self._visual_servo(
-            goal_handle,
-            "bridge",
-            "align_bridge",
-            target_depth=0.8,
-        )
-        self._timed_drive(goal_handle, "cross_bridge", "FORWARD_SLOW", "bridge_cross_sec")
-        self._return_to_start(goal_handle)
-
-    def _run_task3_knob(self, goal_handle):
-        self._prepare_mission_start_pose()
-        self._approach_detected_target(
-            goal_handle,
-            "knob",
-            "approach_detected_knob",
-            "knob_approach",
-        )
-        self._visual_servo(goal_handle, "knob", "align_knob_for_opening")
-        self._send_arm_goal(goal_handle, "open_knob")
-        if self._use_waypoints():
-            self._navigate(goal_handle, "door_inside")
-        else:
-            self._timed_drive(goal_handle, "enter_door", "FORWARD_SLOW", "door_enter_sec")
+            return
+        if node_type == "VisualServo":
+            self._visual_servo(
+                goal_handle,
+                node["label"],
+                node.get("phase", f"align_{node['label']}"),
+                target_depth=node.get("target_depth"),
+                timeout_sec=node.get("timeout_sec"),
+                allow_missing=bool(node.get("allow_missing", False)),
+            )
+            return
+        if node_type == "AlignBridgeOrientation":
+            self._align_bridge_orientation(
+                goal_handle,
+                node.get("label", "bridge"),
+                node.get("phase", "align_bridge_orientation"),
+            )
+            return
+        if node_type == "TimedDrive":
+            self._timed_drive(
+                goal_handle,
+                node["phase"],
+                node["action"],
+                node["config_key"],
+            )
+            return
+        if node_type == "ArmGoal":
+            self._send_arm_goal(goal_handle, node["mode"])
+            return
+        if node_type == "ReturnToStart":
+            self._return_to_start(goal_handle)
+            return
+        raise RuntimeError(f"Unknown behavior tree node type: {node_type}")
 
     def _approach_detected_target(self, goal_handle, label, phase, fallback_waypoint):
         self._check_cancel(goal_handle)
@@ -237,7 +235,7 @@ class MissionTaskNode(Node):
                 self._run_short_hop_approach(goal_handle, label, phase, dynamic_cfg)
             else:
                 self._settle_before_detection(goal_handle, label, dynamic_cfg)
-                detection = self._wait_for_detection(goal_handle, label, dynamic_cfg, phase)
+                detection = self._wait_for_detection(goal_handle, label, dynamic_cfg)
                 goal_pose = self._build_dynamic_goal_pose(label, detection, dynamic_cfg)
                 self._publish_goal_pose(goal_pose)
                 self._send_nav_goal(goal_handle, "Manual_Nav")
@@ -259,9 +257,13 @@ class MissionTaskNode(Node):
         else:
             self._search_for_target(goal_handle, label, f"find_{label}")
 
-    def _wait_for_detection(self, goal_handle, label, dynamic_cfg, phase):
+    def _wait_for_detection(self, goal_handle, label, dynamic_cfg):
         timeout = float(dynamic_cfg.get("detection_timeout_sec", 45.0))
-        min_confidence = self._dynamic_min_confidence(label, dynamic_cfg)
+        min_confidence = self._dynamic_label_float(
+            dynamic_cfg.get("min_confidence", 0.0),
+            label,
+            0.0,
+        )
         start = time.monotonic()
         while time.monotonic() - start < timeout:
             self._check_cancel(goal_handle)
@@ -307,7 +309,7 @@ class MissionTaskNode(Node):
         for hop_idx in range(1, max_hops + 1):
             self._publish_phase(goal_handle, f"{phase}:hop_{hop_idx}")
             self._settle_before_detection(goal_handle, label, dynamic_cfg)
-            detection = self._wait_for_detection(goal_handle, label, refresh_cfg, phase)
+            detection = self._wait_for_detection(goal_handle, label, refresh_cfg)
             full_goal_pose = self._build_dynamic_goal_pose(label, detection, dynamic_cfg)
             hop_goal_pose, is_final_goal = self._build_short_hop_goal_pose(
                 full_goal_pose,
@@ -351,7 +353,11 @@ class MissionTaskNode(Node):
             raise RuntimeError("missing /amcl_pose")
 
         pose = self.latest_amcl_pose.pose.pose
-        standoff = self._dynamic_standoff(label, dynamic_cfg)
+        standoff = self._dynamic_label_float(
+            dynamic_cfg.get("standoff_m", {}),
+            label,
+            0.9,
+        )
         goal = compute_dynamic_goal(
             pose.position.x,
             pose.position.y,
@@ -403,12 +409,6 @@ class MissionTaskNode(Node):
         msg.pose.position.x = robot_x + dx * scale
         msg.pose.position.y = robot_y + dy * scale
         return msg, False
-
-    def _dynamic_min_confidence(self, label, dynamic_cfg):
-        return self._dynamic_label_float(dynamic_cfg.get("min_confidence", 0.0), label, 0.0)
-
-    def _dynamic_standoff(self, label, dynamic_cfg):
-        return self._dynamic_label_float(dynamic_cfg.get("standoff_m", {}), label, 0.9)
 
     def _dynamic_label_float(self, value, label, default):
         if isinstance(value, dict):
@@ -527,7 +527,11 @@ class MissionTaskNode(Node):
 
         while time.monotonic() - start < timeout:
             self._check_cancel(goal_handle)
-            detection = self._best_detection(label) if label == "bear" else None
+            detection = (
+                select_detection(self.object_detections, label)
+                if label == "bear"
+                else None
+            )
             coords = (
                 detection["offset_flu"]
                 if detection is not None
@@ -613,8 +617,79 @@ class MissionTaskNode(Node):
             time.sleep(0.1)
         self._publish_control("STOP")
 
-    def _best_detection(self, label):
-        return select_detection(self.object_detections, label)
+    def _align_bridge_orientation(self, goal_handle, label, phase):
+        servo_cfg = self.config.get("visual_servo", {})
+        mask_cfg = servo_cfg.get("bridge_mask", {})
+        angle_tol = float(mask_cfg.get("angle_tolerance_rad", 0.12))
+        timeout = float(
+            mask_cfg.get(
+                "orientation_timeout_sec",
+                servo_cfg.get("timeout_sec", 30.0),
+            )
+        )
+        command_period = float(
+            mask_cfg.get(
+                "command_period_sec",
+                servo_cfg.get("command_period_sec", 0.2),
+            )
+        )
+
+        self._publish_phase(goal_handle, phase)
+        start = time.monotonic()
+        while time.monotonic() - start < timeout:
+            self._check_cancel(goal_handle)
+            detection = self._best_full_detection(label)
+            if detection is None:
+                self._publish_control("CLOCKWISE_ROTATION_SLOW")
+                time.sleep(command_period)
+                continue
+            angle = detection.get("mask_angle_rad")
+            try:
+                angle = float(angle)
+            except (TypeError, ValueError):
+                self._publish_control("CLOCKWISE_ROTATION_SLOW")
+                time.sleep(command_period)
+                continue
+
+            if abs(angle) <= angle_tol:
+                self._publish_control("STOP")
+                return
+            action = (
+                "COUNTERCLOCKWISE_ROTATION_SLOW"
+                if angle > 0.0
+                else "CLOCKWISE_ROTATION_SLOW"
+            )
+            self._publish_control(action)
+            time.sleep(command_period)
+
+        self._publish_control("STOP")
+        raise RuntimeError(f"Timed out while aligning {label} orientation")
+
+    def _best_full_detection(self, label):
+        best = None
+        for detection in self.object_detections or []:
+            if not isinstance(detection, dict) or detection.get("label") != label:
+                continue
+            offset = detection.get("offset_flu")
+            if not isinstance(offset, list) or len(offset) != 3:
+                continue
+            try:
+                confidence = float(detection.get("confidence", 0.0))
+                depth = float(offset[0])
+            except (TypeError, ValueError):
+                continue
+            if depth <= 0.0:
+                continue
+            if best is None:
+                best = detection
+                continue
+            best_confidence = float(best.get("confidence", 0.0))
+            best_depth = float(best.get("offset_flu", [float("inf")])[0])
+            if confidence > best_confidence or (
+                confidence == best_confidence and depth < best_depth
+            ):
+                best = detection
+        return best
 
     def _send_nav_goal(self, goal_handle, mode):
         goal = NavGoal.Goal()
@@ -689,7 +764,6 @@ class MissionTaskNode(Node):
         self.get_logger().info(
             "Chassis command "
             f"{action}: front={list(front_vel)} rear={list(rear_vel)} "
-            f"signal_subs={self.chassis_signal_pub.get_subscription_count()} "
             f"front_subs={self.front_wheel_pub.get_subscription_count()} "
             f"rear_subs={self.rear_wheel_pub.get_subscription_count()} "
             f"front_publishers={self.count_publishers('car_C_front_wheel')} "

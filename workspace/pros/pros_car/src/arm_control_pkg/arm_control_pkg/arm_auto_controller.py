@@ -161,6 +161,48 @@ class ArmAutoController:
         self.init_pose()
         return ArmGoal.Result(success=True, message="knob opened")
 
+    def grasp_knob(self, should_cancel=lambda: False):
+        if should_cancel():
+            return ArmGoal.Result(success=False, message="Canceled by user")
+
+        cfg = self.arm_params.get("grasp_knob", {})
+        publish_count = int(cfg.get("pose_publish_count", 5))
+        publish_period = float(cfg.get("pose_publish_period_sec", 0.25))
+        settle_sec = float(cfg.get("pose_settle_sec", 0.5))
+        down_steps = int(cfg.get("down_steps", 1))
+        forward_distance = float(cfg.get("forward_distance", 0.08))
+
+        for pose_name in ("knob_pre_grasp", "knob_grasp"):
+            if not self._move_to_pose(
+                pose_name,
+                publish_count,
+                publish_period,
+                settle_sec,
+                should_cancel,
+            ):
+                return ArmGoal.Result(success=False, message="Canceled by user")
+
+        self.grap()
+        time.sleep(settle_sec)
+        if should_cancel():
+            return ArmGoal.Result(success=False, message="Canceled by user")
+
+        for _ in range(max(0, down_steps)):
+            down_result = self.move_end_effector_direction(direction="down")
+            if isinstance(down_result, ArmGoal.Result) and not down_result.success:
+                return down_result
+            if should_cancel():
+                return ArmGoal.Result(success=False, message="Canceled by user")
+
+        forward_result = self.move_forward_backward(
+            direction="forward",
+            distance=forward_distance,
+        )
+        if isinstance(forward_result, ArmGoal.Result) and not forward_result.success:
+            return forward_result
+
+        return ArmGoal.Result(success=True, message="knob grasped")
+
     def catch(self, label=None, should_cancel=lambda: False):
         if label is None:
             label = self.arm_commute_node.get_object_label()

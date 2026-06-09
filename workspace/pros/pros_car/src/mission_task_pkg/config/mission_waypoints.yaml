@@ -44,6 +44,16 @@ waypoints:
     y: 0.0
     yaw: 0.0
     frame_id: map
+  knob_stage_1:
+    x: 3.0
+    y: 0.0
+    yaw: 0.0
+    frame_id: map
+  knob_stage_2:
+    x: 3.0
+    y: 1.5
+    yaw: 0.0
+    frame_id: map
   door_inside:
     x: 5.0
     y: 0.0
@@ -59,10 +69,10 @@ dynamic_approach:
   fallback_to_waypoint: true
   min_confidence:
     default: 0.0
-    bear: 0.92
+    bear: 0.85
   standoff_m:
     default: 0.5
-    bear: 0.5
+    bear: 0.4
     knob: 0.5
     bridge: 1.0
   short_hop:
@@ -81,11 +91,17 @@ visual_servo:
   depth_tolerance_m: 0.01
   command_period_sec: 0.2
   rotation_settle_sec: 0.35
-  aligned_settle_sec: 3.0
+  aligned_settle_sec: 2.0
   timeout_sec: 100.0
   search_timeout_sec: 100.0
-  bear_recovery_depth_m: 0.8
+  bear_recovery_depth_m: 1.0
   bear_recovery_max_attempts: 5
-  bear_candidate_min_confidence: 0.92
+  bear_candidate_min_confidence: 0.85
   bridge_cross_sec: 4.0
+  bridge_climb_sec: 3.0
+  bridge_descend_sec: 3.0
   door_enter_sec: 2.0
+  bridge_mask:
+    angle_tolerance_rad: 0.12
+    orientation_timeout_sec: 30.0
+    command_period_sec: 0.25

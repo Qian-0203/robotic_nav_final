@@ -94,6 +94,8 @@ class ArmActionServer(Node):
             return functools.partial(self.arm_auto_controller.place_bear, should_cancel=should_cancel)
         elif mode == "open_knob":
             return functools.partial(self.arm_auto_controller.open_knob, should_cancel=should_cancel)
+        elif mode == "grasp_knob":
+            return functools.partial(self.arm_auto_controller.grasp_knob, should_cancel=should_cancel)
         elif mode == "catch2":
             return functools.partial(self.arm_auto_controller.catch2, should_cancel=should_cancel)
         elif mode == "object_follow":

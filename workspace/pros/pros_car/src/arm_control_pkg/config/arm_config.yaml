@@ -49,6 +49,18 @@ poses:
     2: 50.0
     3: 50.0
     4: 0.0
+  knob_pre_grasp:
+    0: 130.0
+    1: 95.0
+    2: 50.0
+    3: 50.0
+    4: 0.0
+  knob_grasp:
+    0: 130.0
+    1: 95.0
+    2: 20.0
+    3: 20.0
+    4: 0.0
 joints_reset:
   0: 90.0
   1: 30.0
@@ -59,3 +71,9 @@ place_bear:
   pose_publish_count: 5
   pose_publish_period_sec: 0.3
   pose_settle_sec: 1.0
+grasp_knob:
+  pose_publish_count: 5
+  pose_publish_period_sec: 0.25
+  pose_settle_sec: 0.5
+  down_steps: 1
+  forward_distance: 0.08

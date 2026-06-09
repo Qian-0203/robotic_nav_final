@@ -1,0 +1,79 @@
+task1_bear:
+  type: Sequence
+  children:
+    - type: PrepareMissionStartPose
+    - type: Retry
+      attempts: 6
+      child:
+        type: Sequence
+        children:
+          - type: ApproachDetectedTarget
+            label: bear
+            phase: approach_detected_bear
+            fallback_waypoint: bear_approach
+          - type: VisualServo
+            label: bear
+            phase: align_bear_for_pickup
+    - type: ArmGoal
+      mode: pickup_bear
+    - type: ReturnToStart
+    - type: ArmGoal
+      mode: place_bear
+
+task2_bridge:
+  type: Sequence
+  children:
+    - type: PrepareMissionStartPose
+    - type: SetTargetLabel
+      label: bridge
+    - type: WaitDetection
+      label: bridge
+      phase: wait_bridge_segmentation
+    - type: VisualServo
+      label: bridge
+      phase: align_bridge_center
+      target_depth: 0.8
+    - type: AlignBridgeOrientation
+      label: bridge
+      phase: align_bridge_orientation
+    - type: TimedDrive
+      phase: climb_bridge
+      action: FORWARD_SLOW
+      config_key: bridge_climb_sec
+    - type: SetTargetLabel
+      label: bear
+    - type: WaitDetection
+      label: bear
+      phase: wait_bear_on_bridge_top
+    - type: VisualServo
+      label: bear
+      phase: align_bear_for_pickup
+    - type: ArmGoal
+      mode: pickup_bear
+    - type: TimedDrive
+      phase: descend_bridge
+      action: BACKWARD_SLOW
+      config_key: bridge_descend_sec
+    - type: ReturnToStart
+    - type: ArmGoal
+      mode: place_bear
+
+task3_knob:
+  type: Sequence
+  children:
+    - type: PrepareMissionStartPose
+    - type: NavigateWaypoint
+      waypoint: knob_stage_1
+    - type: NavigateWaypoint
+      waypoint: knob_stage_2
+    - type: SetTargetLabel
+      label: knob
+    - type: VisualServo
+      label: knob
+      phase: align_knob_for_grasp
+    - type: ArmGoal
+      mode: grasp_knob
+    - type: TimedDrive
+      phase: enter_after_knob
+      action: FORWARD_SLOW
+      config_key: door_enter_sec
