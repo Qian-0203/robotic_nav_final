@@ -62,6 +62,8 @@ def build_bridge_marker_array(
         forward, left, up = [float(value) for value in offset]
         if forward <= 0.0:
             continue
+        marker_forward = -forward
+        marker_left = -left
 
         depth = float(bridge_model.get("ground_contact_depth_m", forward))
         top_width = _pixel_width_to_m(
@@ -88,8 +90,8 @@ def build_bridge_marker_array(
             marker_id,
             frame_id,
             stamp,
-            forward,
-            left,
+            marker_forward,
+            marker_left,
             up,
             top_width,
             bottom_width,
@@ -103,8 +105,8 @@ def build_bridge_marker_array(
             marker_id,
             frame_id,
             stamp,
-            forward,
-            left,
+            marker_forward,
+            marker_left,
             up,
             bottom_width,
             angle,
@@ -116,8 +118,8 @@ def build_bridge_marker_array(
             marker_id,
             frame_id,
             stamp,
-            forward,
-            left,
+            marker_forward,
+            marker_left,
             up + height + 0.08,
             angle,
             confidence,

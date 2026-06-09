@@ -20,6 +20,9 @@ and YOLO integration.
 - `workspace/pros/ros2_yolo_integration`: YOLO ROS 2 integration workspace.
 - `docs`: migration notes and project documentation when available.
 
+If you are trying to tell which files are for the physical robot and which are
+for the Unity simulation, start with `docs/real_vs_unity_map.md`.
+
 ## Quick Start
 
 Start the mission control stack with:
@@ -33,7 +36,7 @@ Run YOLO perception in its workspace:
 
 ```bash
 cd workspace/pros/ros2_yolo_integration
-./yolo_activate.sh --task yolo_mode:=1 enable_arucode:=false
+./yolo_activate_cu128.sh --task yolo_mode:=1 enable_arucode:=false
 ```
 
-Detailed workflow notes are in `docs/yolo_servo_workflow.md`.
+Detailed workflow notes are in `docs/final_project_workflow.md`.

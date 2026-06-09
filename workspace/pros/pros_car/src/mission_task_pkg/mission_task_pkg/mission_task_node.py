@@ -11,7 +11,12 @@ from ament_index_python.packages import get_package_share_directory
 from geometry_msgs.msg import PoseStamped, Quaternion
 from geometry_msgs.msg import PoseWithCovarianceStamped
 from mission_task_pkg.behavior_tree import BehaviorTreeRunner
-from mission_task_pkg.mission_geometry import compute_dynamic_goal, select_detection
+from mission_task_pkg.mission_geometry import (
+    bridge_axis_alignment_error,
+    compute_dynamic_goal,
+    select_detection,
+    yaw_from_quaternion,
+)
 from rclpy.action import ActionClient, ActionServer, CancelResponse, GoalResponse
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
@@ -520,15 +525,30 @@ class MissionTaskNode(Node):
         rotation_settle = float(servo_cfg.get("rotation_settle_sec", command_period))
         aligned_settle = float(servo_cfg.get("aligned_settle_sec", 3.0))
         bear_recovery_depth = float(servo_cfg.get("bear_recovery_depth_m", 1.5))
+        bear_lateral_recovery_sec = float(
+            servo_cfg.get("bear_lateral_recovery_backward_sec", 1.0)
+        )
+        bear_lateral_recovery_max_attempts = int(
+            servo_cfg.get(
+                "bear_lateral_recovery_max_attempts",
+                servo_cfg.get("bear_recovery_max_attempts", 5),
+            )
+        )
+        bear_min_confidence = float(servo_cfg.get("bear_candidate_min_confidence", 0.0))
 
         self._publish_phase(goal_handle, phase)
         start = time.monotonic()
         saw_target = False
+        bear_lateral_recovery_attempts = 0
 
         while time.monotonic() - start < timeout:
             self._check_cancel(goal_handle)
             detection = (
-                select_detection(self.object_detections, label)
+                select_detection(
+                    self.object_detections,
+                    label,
+                    min_confidence=bear_min_confidence,
+                )
                 if label == "bear"
                 else None
             )
@@ -559,6 +579,32 @@ class MissionTaskNode(Node):
                             depth,
                             bear_recovery_depth,
                         )
+                    if (
+                        depth <= target_depth + depth_tol
+                        and abs(lateral) > lateral_tol
+                        and bear_lateral_recovery_sec > 0.0
+                        and bear_lateral_recovery_attempts
+                        < bear_lateral_recovery_max_attempts
+                    ):
+                        bear_lateral_recovery_attempts += 1
+                        self.get_logger().warn(
+                            "Bear reached target depth but lateral is outside "
+                            f"tolerance; backing up for "
+                            f"{bear_lateral_recovery_sec:.1f}s "
+                            f"(attempt {bear_lateral_recovery_attempts}/"
+                            f"{bear_lateral_recovery_max_attempts})"
+                        )
+                        recovery_start = time.monotonic()
+                        while (
+                            time.monotonic() - recovery_start
+                            < bear_lateral_recovery_sec
+                        ):
+                            self._check_cancel(goal_handle)
+                            self._publish_control("BACKWARD_SLOW")
+                            time.sleep(min(0.1, bear_lateral_recovery_sec))
+                        self._publish_control("STOP")
+                        time.sleep(command_period)
+                        continue
                 if abs(lateral) <= lateral_tol and depth <= target_depth + depth_tol:
                     self._publish_control("STOP")
                     if aligned_settle > 0.0:
@@ -574,7 +620,7 @@ class MissionTaskNode(Node):
                 else:
                     action = "FORWARD_SLOW"
             else:
-                action = "CLOCKWISE_ROTATION_SLOW"
+                action = "COUNTERCLOCKWISE_ROTATION_SLOW"
             self._publish_control(action)
             if action in {
                 "CLOCKWISE_ROTATION_SLOW",
@@ -601,7 +647,7 @@ class MissionTaskNode(Node):
             if coords and len(coords) == 3:
                 self._publish_control("STOP")
                 return
-            self._publish_control("CLOCKWISE_ROTATION_SLOW")
+            self._publish_control("COUNTERCLOCKWISE_ROTATION_SLOW")
             time.sleep(0.1)
         self._publish_control("STOP")
         raise RuntimeError(f"Timed out while searching for {label}")
@@ -638,6 +684,11 @@ class MissionTaskNode(Node):
         start = time.monotonic()
         while time.monotonic() - start < timeout:
             self._check_cancel(goal_handle)
+            if self.latest_amcl_pose is None:
+                self._publish_control("CLOCKWISE_ROTATION_SLOW")
+                time.sleep(command_period)
+                continue
+
             detection = self._best_full_detection(label)
             if detection is None:
                 self._publish_control("CLOCKWISE_ROTATION_SLOW")
@@ -651,12 +702,20 @@ class MissionTaskNode(Node):
                 time.sleep(command_period)
                 continue
 
-            if abs(angle) <= angle_tol:
+            robot_yaw = yaw_from_quaternion(self.latest_amcl_pose.pose.pose.orientation)
+            yaw_error, snapped_heading = bridge_axis_alignment_error(robot_yaw, angle)
+            self.get_logger().info(
+                f"Bridge orientation: image_angle={angle:.3f} "
+                f"robot_yaw={robot_yaw:.3f} snapped_axis={snapped_heading:.3f} "
+                f"yaw_error={yaw_error:.3f}"
+            )
+
+            if abs(yaw_error) <= angle_tol:
                 self._publish_control("STOP")
                 return
             action = (
                 "COUNTERCLOCKWISE_ROTATION_SLOW"
-                if angle > 0.0
+                if yaw_error > 0.0
                 else "CLOCKWISE_ROTATION_SLOW"
             )
             self._publish_control(action)

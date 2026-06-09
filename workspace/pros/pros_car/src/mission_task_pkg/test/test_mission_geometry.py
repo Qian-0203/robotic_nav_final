@@ -2,9 +2,12 @@ import math
 import unittest
 
 from mission_task_pkg.mission_geometry import (
+    bridge_axis_alignment_error,
     compute_dynamic_goal,
     estimate_target_map_pose,
+    normalize_angle,
     select_detection,
+    snap_angle_to_axis,
     yaw_from_quaternion,
 )
 
@@ -16,6 +19,20 @@ class MissionGeometryTest(unittest.TestCase):
         )
 
         self.assertAlmostEqual(yaw, math.pi / 2.0)
+
+    def test_snap_angle_to_axis_uses_nearest_cardinal_heading(self):
+        self.assertAlmostEqual(snap_angle_to_axis(0.2), 0.0)
+        self.assertAlmostEqual(snap_angle_to_axis(1.3), math.pi / 2.0)
+        self.assertAlmostEqual(snap_angle_to_axis(-1.3), -math.pi / 2.0)
+
+    def test_bridge_axis_alignment_error_combines_image_angle_and_robot_yaw(self):
+        yaw_error, snapped_heading = bridge_axis_alignment_error(
+            robot_yaw=0.2,
+            image_angle_rad=0.9,
+        )
+
+        self.assertAlmostEqual(snapped_heading, math.pi / 2.0)
+        self.assertAlmostEqual(yaw_error, normalize_angle(math.pi / 2.0 - 0.2))
 
     def test_estimate_target_map_pose_uses_forward_and_left_offsets(self):
         target_x, target_y = estimate_target_map_pose(
@@ -43,18 +60,19 @@ class MissionGeometryTest(unittest.TestCase):
         self.assertAlmostEqual(goal["goal_y"], 0.0)
         self.assertAlmostEqual(goal["goal_yaw"], 0.0)
 
-    def test_select_detection_filters_invalid_and_uses_confidence_then_depth(self):
+    def test_select_detection_filters_invalid_and_uses_depth_then_confidence(self):
         detections = [
             {"label": "bear", "confidence": 0.2, "offset_flu": [1.0, 0.0, 0.0]},
             {"label": "bear", "confidence": 0.95, "offset_flu": [-1.0, 0.0, 0.0]},
             {"label": "knob", "confidence": 0.99, "offset_flu": [1.0, 0.0, 0.0]},
-            {"label": "bear", "confidence": 0.8, "offset_flu": [2.0, 0.0, 0.0]},
+            {"label": "bear", "confidence": 0.9, "offset_flu": [2.0, 0.0, 0.0]},
             {"label": "bear", "confidence": 0.8, "offset_flu": [1.5, 0.0, 0.0]},
+            {"label": "bear", "confidence": 0.85, "offset_flu": [1.5, 0.1, 0.0]},
         ]
 
         selected = select_detection(detections, "bear", min_confidence=0.5)
 
-        self.assertEqual(selected, {"confidence": 0.8, "offset_flu": [1.5, 0.0, 0.0]})
+        self.assertEqual(selected, {"confidence": 0.85, "offset_flu": [1.5, 0.1, 0.0]})
 
     def test_select_detection_returns_none_when_confidence_is_too_low(self):
         selected = select_detection(

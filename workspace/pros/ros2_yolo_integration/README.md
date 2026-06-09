@@ -3,10 +3,10 @@
 ### Usage
 1. Run the provided activation script to start the container and prepare the environment
 ```
-./yolo_activate.sh --task yolo_mode:=1 enable_arucode:=false
+./yolo_activate_cu128.sh --task yolo_mode:=1 enable_arucode:=false
 ```
 
-The activation script builds the ROS 2 workspace in the container and launches
+The CUDA 12.8 activation script builds the ROS 2 workspace in the container and launches
 `yolo_pkg yolo_detection_node`.
 
 ### Current project configuration
@@ -24,7 +24,8 @@ The activation script builds the ROS 2 workspace in the container and launches
 `yolo_pkg` loads these models through `model_package: "yolo_example_pkg"` in
 `yolo_params.yaml`. The config currently sets `device: "cpu"` because the
 project container's PyTorch build does not support the RTX 5060 CUDA
-architecture. When `device: "cpu"` is set, `yolo_activate.sh` skips the GPU
+architecture. Use `yolo_activate_cu128.sh` for the CUDA 12.8 YOLO runtime.
+When `device: "cpu"` is set, `yolo_activate.sh` skips the GPU
 attempt and starts one CPU container directly.
 
 ### Mode
@@ -61,7 +62,7 @@ This is a ROS 2 project for integrating YOLO with ROS 2, providing functionality
 ### Usage
 1. Run the provided activation script to start the container and prepare the environment
 ```
-./yolo_activate.sh
+./yolo_activate_cu128.sh
 ```
 2. Do colcon build and source ./install/setup.bash
 ```

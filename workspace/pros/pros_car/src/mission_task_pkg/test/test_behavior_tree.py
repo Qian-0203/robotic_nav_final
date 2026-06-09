@@ -63,10 +63,27 @@ class BehaviorTreeRunnerTest(unittest.TestCase):
         self.assertEqual(children[4]["type"], "VisualServo")
         self.assertEqual(children[5]["mode"], "grasp_knob")
 
+    def test_task1_bear_fallback_and_detection_timeout(self):
+        config = _load_mission_waypoints()
+
+        bear_waypoint = config["waypoints"]["bear_approach"]
+        self.assertEqual(bear_waypoint["x"], 0.25)
+        self.assertEqual(bear_waypoint["y"], 0.25)
+
+        bear_short_hop = config["dynamic_approach"]["short_hop"]["bear"]
+        self.assertEqual(bear_short_hop["detection_refresh_timeout_sec"], 5.0)
+
 
 def _load_mission_trees():
     here = os.path.dirname(__file__)
     config_path = os.path.join(here, "..", "config", "mission_trees.yaml")
+    with open(config_path, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f)
+
+
+def _load_mission_waypoints():
+    here = os.path.dirname(__file__)
+    config_path = os.path.join(here, "..", "config", "mission_waypoints.yaml")
     with open(config_path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
 

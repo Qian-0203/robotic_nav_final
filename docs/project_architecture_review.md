@@ -108,40 +108,61 @@ flowchart TD
 
 ## Mission Flow
 
+`mission_task_node` now accepts `MissionTask` goals and validates `task_id`
+against the keys loaded from `mission_trees.yaml`. The task tree describes the
+sequence, while the Python node only implements reusable primitives such as
+navigation, target-label selection, detection waits, visual servoing, timed
+drive, and arm goals.
+
 ```mermaid
 flowchart TD
     Start[MissionTask goal received]
-    Validate{task_id valid?}
-    Capture[Capture /amcl_pose as start pose]
+    LoadTree[Select behavior tree from mission_trees.yaml]
+    Primitive[Run next primitive]
+    Prepare[Prepare configured initial pose]
     SetLabel[Publish /target_label]
     Detect[Wait for YOLO target offset]
-    Estimate[Estimate target pose in map]
-    PublishDynamicGoal[Publish stand-off /goal_pose]
+    DynamicGoal[Estimate target pose and publish stand-off /goal_pose]
     SendNav[Send NavGoal: Manual_Nav]
     Fallback[Fallback to configured waypoint/search]
     Servo[Slow visual servo fine alignment]
+    BridgeAlign[Align bridge mask orientation]
     ArmGoal[Send ArmGoal mode]
     TimedDrive[Timed wheel command]
-    ReturnStart[Return to captured start or configured start]
+    ReturnStart[Return to configured start]
     Stop[Publish STOP]
     Done[Action success]
     Fail[Action abort/cancel]
 
-    Start --> Validate
-    Validate -- no --> Fail
-    Validate -- yes --> Capture
-    Capture --> SetLabel --> Detect --> Estimate --> PublishDynamicGoal --> SendNav --> Servo
+    Start --> LoadTree
+    LoadTree -- unknown task_id --> Fail
+    LoadTree --> Primitive
+    Primitive --> Prepare
+    Primitive --> SetLabel
+    Primitive --> Detect
+    Primitive --> DynamicGoal
+    Primitive --> SendNav
+    Primitive --> Servo
+    Primitive --> BridgeAlign
+    Primitive --> TimedDrive
+    Primitive --> ArmGoal
+    Primitive --> ReturnStart
+
+    Detect --> DynamicGoal --> SendNav
     Detect -- timeout --> Fallback
-    Estimate -- failed --> Fallback
+    DynamicGoal -- failed --> Fallback
     SendNav -- failed --> Fallback
     Fallback --> SendNav
     Fallback --> Servo
 
-    Servo --> TaskChoice{Task}
-    TaskChoice -- bear --> ArmGoal --> ReturnStart --> ArmGoal
-    TaskChoice -- bridge --> TimedDrive --> ReturnStart
-    TaskChoice -- knob --> ArmGoal --> TimedDrive
-
+    Prepare --> Primitive
+    SetLabel --> Primitive
+    SendNav --> Primitive
+    Servo --> Primitive
+    BridgeAlign --> Primitive
+    TimedDrive --> Primitive
+    ArmGoal --> Primitive
+    ReturnStart --> Primitive
     ReturnStart --> Stop --> Done
     TimedDrive --> Stop --> Done
     ArmGoal --> Stop --> Done
@@ -150,9 +171,9 @@ flowchart TD
 
 Current mission tasks:
 
-- `task1_bear`: capture start pose, YOLO-estimate bear pose, navigate to a coarse stand-off goal, slow visual-servo fine alignment, `pickup_bear`, return to start, `place_bear`.
-- `task2_bridge`: capture start pose, YOLO-estimate bridge pose, navigate to a farther stand-off goal, slow visual-servo alignment at larger target depth, timed forward drive across bridge, return to start.
-- `task3_knob`: YOLO-estimate knob pose, navigate to a coarse stand-off goal, slow visual-servo fine alignment, `open_knob`, then enter door by waypoint or timed forward drive.
+- `task1_bear`: prepare the start pose, retry bear dynamic approach plus visual servo alignment, `pickup_bear`, return to `start`, then `place_bear`.
+- `task2_bridge`: prepare the start pose, target `bridge`, wait for bridge segmentation, visual-servo bridge center, align mask orientation, climb forward, target `bear`, pick it up on the bridge, drive backward down, return to `start`, then `place_bear`.
+- `task3_knob`: prepare the start pose, navigate through `knob_stage_1` and `knob_stage_2`, target `knob`, visual-servo for grasp, run `grasp_knob`, then timed-drive forward through the door.
 
 ## Architecture Review
 
