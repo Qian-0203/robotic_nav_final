@@ -206,7 +206,7 @@ def _publish_bridge_tf(ros_communicator, offsets_3d_json):
     transform.transform.translation.y = -float(offset[1])
     transform.transform.translation.z = float(offset[2])
 
-    yaw = _bridge_ground_edge_yaw(detection)
+    yaw = _bridge_tf_yaw(detection)
     if yaw is None:
         yaw = float(detection.get("mask_angle_rad", 0.0))
     transform.transform.rotation.z = math.sin(yaw / 2.0)
@@ -289,29 +289,33 @@ def _bridge_detection_offset(detection):
     return None
 
 
-def _bridge_ground_edge_yaw(detection):
+def _bridge_tf_yaw(detection):
     bridge_model = detection.get("bridge_model")
     if not isinstance(bridge_model, dict):
-        return None
+        return 0.0
+    try:
+        return float(bridge_model["bridge_tf_yaw_rad"])
+    except (KeyError, TypeError, ValueError):
+        pass
 
     corners = bridge_model.get("ground_edge_corners_flu")
     if not isinstance(corners, list) or len(corners) != 2:
-        return None
+        return 0.0
     try:
         start = [float(value) for value in corners[0]]
         end = [float(value) for value in corners[1]]
     except (TypeError, ValueError):
-        return None
+        return 0.0
     if len(start) != 3 or len(end) != 3:
-        return None
+        return 0.0
 
     start_x, start_y = -start[0], -start[1]
     end_x, end_y = -end[0], -end[1]
     dx = end_x - start_x
     dy = end_y - start_y
     if abs(dx) < 1e-6 and abs(dy) < 1e-6:
-        return None
-    return math.atan2(dy, dx)
+        return 0.0
+    return 0.0 if abs(dx) >= abs(dy) else math.pi / 2.0
 
 
 if __name__ == "__main__":

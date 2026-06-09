@@ -1,6 +1,6 @@
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import Float32MultiArray, String, Float32
+from std_msgs.msg import String, Float32
 from trajectory_msgs.msg import JointTrajectoryPoint
 from sensor_msgs.msg import Imu  # Import the Imu message type
 import math
@@ -37,15 +37,10 @@ class ArmCummuteNode(Node):
             JointTrajectoryPoint, self.arm_params["global"]["arm_topic"], 10
         )
 
-        self.rear_wheel_pub = self.create_publisher(
-            Float32MultiArray,
-            'car_C_rear_wheel',
-            10
-        )
-        self.front_wheel_pub = self.create_publisher(
-            Float32MultiArray,
-            'car_C_front_wheel',
-            10
+        self.control_signal_pub = self.create_publisher(
+            String,
+            'car_control_signal',
+            10,
         )
 
         self.arucode_pub = self.create_publisher(Float32, '/aruco/id100/depth_m', 10)
@@ -227,13 +222,9 @@ class ArmCummuteNode(Node):
 
 
     def publish_control(self, vel):
-        # Both publishers are available
-        rear_msg = Float32MultiArray()
-        front_msg = Float32MultiArray()
-        front_msg.data = vel[0:2]
-        rear_msg.data = vel[2:4]
-        self.rear_wheel_pub.publish(rear_msg)
-        self.front_wheel_pub.publish(front_msg)
+        msg = String()
+        msg.data = "Raw_Control:" + ",".join(str(float(value)) for value in vel[0:4])
+        self.control_signal_pub.publish(msg)
 
     def arucode_sub_callback(self, msg: Float32):
         self.latest_arucode_depth = msg.data

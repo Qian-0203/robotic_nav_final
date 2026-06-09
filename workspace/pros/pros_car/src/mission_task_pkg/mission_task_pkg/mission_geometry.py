@@ -24,30 +24,6 @@ def yaw_from_quaternion(quat):
     return math.atan2(siny_cosp, cosy_cosp)
 
 
-def snap_angle_to_axis(angle, axes=None):
-    """Snap a heading to the nearest allowed map axis."""
-    if axes is None:
-        axes = (0.0, math.pi / 2.0, -math.pi / 2.0, math.pi)
-    normalized = normalize_angle(angle)
-    return min(axes, key=lambda axis: abs(normalize_angle(normalized - axis)))
-
-
-def estimate_axis_aligned_bridge_heading(robot_yaw, image_angle_rad, axes=None):
-    """Convert image-frame bridge angle to map heading and snap it to an axis."""
-    raw_heading = normalize_angle(robot_yaw + image_angle_rad)
-    return snap_angle_to_axis(raw_heading, axes=axes)
-
-
-def bridge_axis_alignment_error(robot_yaw, image_angle_rad, axes=None):
-    """Return signed robot yaw error to the snapped bridge axis."""
-    snapped_heading = estimate_axis_aligned_bridge_heading(
-        robot_yaw,
-        image_angle_rad,
-        axes=axes,
-    )
-    return normalize_angle(snapped_heading - robot_yaw), snapped_heading
-
-
 def select_detection(detections, label, min_confidence=0.0):
     """Pick the nearest valid detection for a target label."""
     best = None

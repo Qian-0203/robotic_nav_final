@@ -4,6 +4,7 @@ import unittest
 import numpy as np
 
 from yolo_pkg.segmentation_geometry import (
+    _bridge_tf_axes_from_ground_edge,
     build_segmentation_offset,
     compute_mask_geometry,
     estimate_bridge_model,
@@ -104,6 +105,10 @@ class SegmentationGeometryTest(unittest.TestCase):
         self.assertEqual(len(model["ground_edge_corners_flu"]), 2)
         self.assertIn("ground_contact_center_px", model)
         self.assertIn("ground_contact_offset_flu", model)
+        self.assertIn("bridge_tf_origin_flu", model)
+        self.assertIn("bridge_tf_x_axis_flu", model)
+        self.assertIn("bridge_tf_y_axis_flu", model)
+        self.assertIn("bridge_tf_yaw_rad", model)
 
     def test_ground_edge_uses_lowest_3d_z(self):
         mask = np.zeros((20, 30), dtype=bool)
@@ -122,6 +127,34 @@ class SegmentationGeometryTest(unittest.TestCase):
 
         edge_z = [corner[2] for corner in model["ground_edge_corners_flu"]]
         self.assertEqual(edge_z, [-1.0, -1.0])
+
+    def test_bridge_tf_snaps_x_axis_for_x_parallel_ground_edge(self):
+        axes = _bridge_tf_axes_from_ground_edge(
+            [
+                [1.0, 0.0, 0.0],
+                [2.0, 0.0, 0.0],
+            ]
+        )
+
+        # Marker-frame X is [1, 0, 0], represented in FLU as [-1, 0, 0].
+        self.assertEqual(axes["axis_name"], "x")
+        self.assertAlmostEqual(axes["yaw_rad"], 0.0, places=3)
+        self.assertEqual(axes["x_axis_flu"], [-1.0, -0.0, 0.0])
+        self.assertEqual(axes["y_axis_flu"], [-0.0, -1.0, 0.0])
+
+    def test_bridge_tf_snaps_x_axis_for_y_parallel_ground_edge(self):
+        axes = _bridge_tf_axes_from_ground_edge(
+            [
+                [1.0, 1.0, 0.0],
+                [1.0, -1.0, 0.0],
+            ]
+        )
+
+        # Marker-frame X is [0, 1, 0], represented in FLU as [0, -1, 0].
+        self.assertEqual(axes["axis_name"], "y")
+        self.assertAlmostEqual(axes["yaw_rad"], math.pi / 2.0, places=3)
+        self.assertEqual(axes["x_axis_flu"], [-0.0, -1.0, 0.0])
+        self.assertEqual(axes["y_axis_flu"], [1.0, -0.0, 0.0])
 
 
 if __name__ == "__main__":

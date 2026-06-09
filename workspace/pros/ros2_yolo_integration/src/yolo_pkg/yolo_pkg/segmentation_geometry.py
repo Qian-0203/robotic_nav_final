@@ -122,6 +122,43 @@ def _edge_with_lowest_z(corner_offsets):
     )
 
 
+def _bridge_tf_axes_from_ground_edge(edge_offsets):
+    start, end = edge_offsets
+    start_x, start_y = -float(start[0]), -float(start[1])
+    end_x, end_y = -float(end[0]), -float(end[1])
+    dx = end_x - start_x
+    dy = end_y - start_y
+
+    # Marker frame is x=-forward, y=-left, z=up. Default bridge TF +X points
+    # to marker [1, 0, 0] (yaw 0). Switch to [0, 1, 0] only when the
+    # lowest edge is more parallel to marker/world Y.
+    if abs(dx) >= abs(dy):
+        yaw = 0.0
+        x_axis_marker = [1.0, 0.0, 0.0]
+        y_axis_marker = [0.0, 1.0, 0.0]
+        axis_name = "x"
+    else:
+        yaw = math.pi / 2.0
+        x_axis_marker = [0.0, 1.0, 0.0]
+        y_axis_marker = [-1.0, 0.0, 0.0]
+        axis_name = "y"
+
+    return {
+        "axis_name": axis_name,
+        "yaw_rad": yaw,
+        "x_axis_flu": [
+            -x_axis_marker[0],
+            -x_axis_marker[1],
+            x_axis_marker[2],
+        ],
+        "y_axis_flu": [
+            -y_axis_marker[0],
+            -y_axis_marker[1],
+            y_axis_marker[2],
+        ],
+    }
+
+
 def _average_offset(offset_a, offset_b):
     return [
         round((float(offset_a[0]) + float(offset_b[0])) / 2.0, 3),
@@ -192,6 +229,11 @@ def estimate_bridge_model(mask, depth_image, intrinsics):
         corner_offsets[ground_edge[0]],
         corner_offsets[ground_edge[1]],
     )
+    ground_edge_offsets = [
+        corner_offsets[ground_edge[0]],
+        corner_offsets[ground_edge[1]],
+    ]
+    bridge_tf = _bridge_tf_axes_from_ground_edge(ground_edge_offsets)
     ground_depth = (
         corner_depths[ground_edge[0]] + corner_depths[ground_edge[1]]
     ) / 2.0
@@ -210,11 +252,14 @@ def estimate_bridge_model(mask, depth_image, intrinsics):
         "ground_contact_center_px": _round_point(ground_contact_center_px),
         "ground_contact_depth_m": round(float(ground_depth), 3),
         "ground_contact_offset_flu": ground_contact_offset,
+        "bridge_tf_origin_flu": ground_contact_offset,
+        "bridge_tf_x_axis_flu": bridge_tf["x_axis_flu"],
+        "bridge_tf_y_axis_flu": bridge_tf["y_axis_flu"],
+        "bridge_tf_z_axis_flu": [0.0, 0.0, 1.0],
+        "bridge_tf_axis_name": bridge_tf["axis_name"],
+        "bridge_tf_yaw_rad": round(float(bridge_tf["yaw_rad"]), 3),
         "lateral_face_corners_flu": corner_offsets,
-        "ground_edge_corners_flu": [
-            corner_offsets[ground_edge[0]],
-            corner_offsets[ground_edge[1]],
-        ],
+        "ground_edge_corners_flu": ground_edge_offsets,
     }
 
 

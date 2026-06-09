@@ -32,13 +32,14 @@ task2_bridge:
     - type: ApproachBridgePreAlign
       label: bridge
       phase: approach_bridge_y_offset
+    - type: ApproachBridgePreAlign
+      label: bridge
+      phase: approach_bridge_tf_point
+      offset_m: 0.0
     - type: VisualServo
       label: bridge
       phase: align_bridge_center
       target_depth: 0.8
-    - type: AlignBridgeOrientation
-      label: bridge
-      phase: align_bridge_orientation
     - type: TimedDrive
       phase: climb_bridge
       action: FORWARD_SLOW

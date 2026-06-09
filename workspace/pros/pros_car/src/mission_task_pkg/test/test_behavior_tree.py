@@ -43,17 +43,29 @@ class BehaviorTreeRunnerTest(unittest.TestCase):
             runner.run("missing", None)
 
     def test_task2_tree_contains_bridge_then_bear_flow(self):
-        runner = BehaviorTreeRunner(_load_mission_trees(), lambda *_args: None)
+        trees = _load_mission_trees()
+        runner = BehaviorTreeRunner(trees, lambda *_args: None)
 
         types = runner.flatten_types("task2_bridge")
+        phases = [
+            child.get("phase")
+            for child in trees["task2_bridge"]["children"]
+            if child.get("phase")
+        ]
 
         self.assertIn("ApproachBridgePreAlign", types)
-        self.assertIn("AlignBridgeOrientation", types)
         self.assertIn("TimedDrive", types)
         self.assertIn("ReturnToStart", types)
         self.assertLess(types.index("WaitDetection"), types.index("ApproachBridgePreAlign"))
-        self.assertLess(types.index("ApproachBridgePreAlign"), types.index("VisualServo"))
-        self.assertLess(types.index("AlignBridgeOrientation"), types.index("ArmGoal"))
+        self.assertLess(
+            phases.index("approach_bridge_y_offset"),
+            phases.index("approach_bridge_tf_point"),
+        )
+        self.assertLess(
+            phases.index("approach_bridge_tf_point"),
+            phases.index("align_bridge_center"),
+        )
+        self.assertLess(types.index("VisualServo"), types.index("ArmGoal"))
 
     def test_task3_tree_uses_fixed_waypoints_before_knob_servo(self):
         trees = _load_mission_trees()

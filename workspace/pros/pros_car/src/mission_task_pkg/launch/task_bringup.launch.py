@@ -8,6 +8,7 @@ from launch_ros.actions import Node
 def generate_launch_description():
     enable_unity_arm_bridge = LaunchConfiguration("enable_unity_arm_bridge")
     enable_car_c_writer = LaunchConfiguration("enable_car_c_writer")
+    enable_cmd_vel_wheel_control = LaunchConfiguration("enable_cmd_vel_wheel_control")
     waypoints_file = LaunchConfiguration("waypoints_file")
     mission_trees_file = LaunchConfiguration("mission_trees_file")
 
@@ -30,6 +31,11 @@ def generate_launch_description():
                 description="Start the wheel serial writer for the real car.",
             ),
             DeclareLaunchArgument(
+                "enable_cmd_vel_wheel_control",
+                default_value="false",
+                description="Allow car_control_node to convert /cmd_vel into wheel commands.",
+            ),
+            DeclareLaunchArgument(
                 "waypoints_file",
                 default_value="",
                 description="Optional path to mission_waypoints.yaml",
@@ -43,6 +49,11 @@ def generate_launch_description():
                 package="car_control_pkg",
                 executable="car_control_node",
                 output="screen",
+                parameters=[
+                    {
+                        "enable_cmd_vel_wheel_control": enable_cmd_vel_wheel_control,
+                    }
+                ],
             ),
             Node(
                 package="pros_car_py",

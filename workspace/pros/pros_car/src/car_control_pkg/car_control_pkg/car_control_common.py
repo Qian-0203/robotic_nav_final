@@ -9,6 +9,30 @@ from car_control_pkg.nav2_utils import cal_distance
 import json
 
 
+MISSION_ACTION_MAPPINGS = {
+    "FORWARD": [200.0, 200.0, 200.0, 200.0],
+    "COUNTERCLOCKWISE_ROTATION": [-300.0, 300.0, -300.0, 300.0],
+    "CLOCKWISE_ROTATION": [300.0, -300.0, 300.0, -300.0],
+    "FORWARD_SLOW": [100.0, 100.0, 100.0, 100.0],
+    "BACKWARD_SLOW": [-100.0, -100.0, -100.0, -100.0],
+    "COUNTERCLOCKWISE_ROTATION_SLOW": [-230.0, 230.0, -230.0, 230.0],
+    "CLOCKWISE_ROTATION_SLOW": [230.0, -230.0, 230.0, -230.0],
+    "STOP": [0.0, 0.0, 0.0, 0.0],
+}
+
+
+MANUAL_KEY_ACTIONS = {
+    "w": "FORWARD",
+    "s": "BACKWARD",
+    "a": "LEFT_FRONT",
+    "d": "RIGHT_FRONT",
+    "e": "COUNTERCLOCKWISE_ROTATION",
+    "r": "CLOCKWISE_ROTATION",
+    "z": "STOP",
+    "q": "STOP",
+}
+
+
 def _is_nearer_offset(candidate, current):
     """Return True when candidate has a smaller valid forward depth."""
     if current is None:
@@ -43,7 +67,10 @@ class CarControlPublishers:
         If the action is a list, it will be used as the velocity array directly.
         """
         if not isinstance(action, str):
-            vel = [action[0], action[1], action[0], action[1]]
+            if len(action) >= 4:
+                vel = [float(value) for value in action[0:4]]
+            else:
+                vel = [float(action[0]), float(action[1]), float(action[0]), float(action[1])]
 
         else:
             vel = get_action_mapping(action)
@@ -73,6 +100,7 @@ class BaseCarControlNode(Node):
     def __init__(self, node_name, enable_nav_subscribers=False):
         super().__init__(node_name)
         self.declare_parameter("object_nav_label", "bear")
+        self.declare_parameter("enable_cmd_vel_wheel_control", False)
 
         # Create common publishers
         self.rear_wheel_pub, self.front_wheel_pub = (
@@ -299,9 +327,10 @@ class BaseCarControlNode(Node):
         v_left = max(min_speed, min(max_speed, v_left))
         v_right = max(min_speed, min(max_speed, v_right))
 
-        speed_msg = Float32MultiArray()
-        speed_msg.data = [v_left, v_right]
         self.latest_cmd_vel = [v_left, v_right]
+        if not self.get_parameter("enable_cmd_vel_wheel_control").value:
+            return
+
         self.publish_control([v_left, v_right])
 
     def get_cmd_vel_data(self):
@@ -352,4 +381,24 @@ class BaseCarControlNode(Node):
         if mode == "Mission_Control":
             action = command.upper()
             self.get_logger().info(f"Mission control command received: {action}")
+            if action not in MISSION_ACTION_MAPPINGS:
+                self.get_logger().warn(f"Unknown mission control action: {action}")
+                return
+            self.publish_control(MISSION_ACTION_MAPPINGS[action])
+        elif mode == "Manual_Control":
+            action = MANUAL_KEY_ACTIONS.get(command.lower())
+            if action is None:
+                return
+            self.get_logger().info(f"Manual control command received: {action}")
             self.publish_control(action)
+        elif mode == "Raw_Control":
+            try:
+                vel = [float(value.strip()) for value in command.split(",")]
+            except ValueError:
+                self.get_logger().warn(f"Invalid raw control command: {command}")
+                return
+            if len(vel) != 4:
+                self.get_logger().warn(f"Raw control needs 4 values, got {len(vel)}")
+                return
+            self.get_logger().info(f"Raw control command received: {vel}")
+            self.publish_control(vel)

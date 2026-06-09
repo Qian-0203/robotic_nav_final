@@ -20,6 +20,7 @@ setup(
     entry_points={
         "console_scripts": [
             "car_control_node = car_control_pkg.main:main",
+            "wheel_command_monitor = car_control_pkg.wheel_command_monitor:main",
         ],
     },
 )

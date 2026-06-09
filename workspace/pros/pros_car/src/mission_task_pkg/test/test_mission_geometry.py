@@ -2,12 +2,9 @@ import math
 import unittest
 
 from mission_task_pkg.mission_geometry import (
-    bridge_axis_alignment_error,
     compute_dynamic_goal,
     estimate_target_map_pose,
-    normalize_angle,
     select_detection,
-    snap_angle_to_axis,
     yaw_from_quaternion,
 )
 
@@ -19,20 +16,6 @@ class MissionGeometryTest(unittest.TestCase):
         )
 
         self.assertAlmostEqual(yaw, math.pi / 2.0)
-
-    def test_snap_angle_to_axis_uses_nearest_cardinal_heading(self):
-        self.assertAlmostEqual(snap_angle_to_axis(0.2), 0.0)
-        self.assertAlmostEqual(snap_angle_to_axis(1.3), math.pi / 2.0)
-        self.assertAlmostEqual(snap_angle_to_axis(-1.3), -math.pi / 2.0)
-
-    def test_bridge_axis_alignment_error_combines_image_angle_and_robot_yaw(self):
-        yaw_error, snapped_heading = bridge_axis_alignment_error(
-            robot_yaw=0.2,
-            image_angle_rad=0.9,
-        )
-
-        self.assertAlmostEqual(snapped_heading, math.pi / 2.0)
-        self.assertAlmostEqual(yaw_error, normalize_angle(math.pi / 2.0 - 0.2))
 
     def test_estimate_target_map_pose_uses_forward_and_left_offsets(self):
         target_x, target_y = estimate_target_map_pose(
