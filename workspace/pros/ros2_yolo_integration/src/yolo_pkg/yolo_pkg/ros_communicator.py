@@ -3,6 +3,7 @@ from rclpy.qos import QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
 from sensor_msgs.msg import CompressedImage, Imu, Image
 from std_msgs.msg import String, Bool
 from geometry_msgs.msg import PointStamped
+from visualization_msgs.msg import MarkerArray
 
 
 class RosCommunicator(Node):
@@ -54,6 +55,10 @@ class RosCommunicator(Node):
             "detection_status": {
                 "topic": "/yolo/detection/status",
                 "msg_type": Bool,
+            },
+            "bridge_marker": {
+                "topic": "/yolo/bridge_marker",
+                "msg_type": MarkerArray,
             },
         }
 

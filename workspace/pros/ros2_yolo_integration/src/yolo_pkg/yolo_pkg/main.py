@@ -10,6 +10,8 @@ from yolo_pkg.camera_geometry import CameraGeometry
 import threading
 from std_msgs.msg import String  # Import String message type
 from yolo_pkg.load_params import LoadParams
+import json
+from yolo_pkg.bridge_marker import build_bridge_marker_array
 
 
 def _init_ros_node(args=None):
@@ -46,6 +48,7 @@ def main(args=None):
     load_params = LoadParams("yolo_pkg")
     ros_communicator, executor, ros_thread = _init_ros_node(args=args)
     ros_communicator.declare_parameter("mode", "1")
+    ros_communicator.declare_parameter("bridge_marker_frame_id", "base_link")
     image_processor = ImageProcessor(ros_communicator, load_params)
     yolo_boundingbox = YoloBoundingBox(image_processor, load_params)
     yolo_depth_extractor = YoloDepthExtractor(
@@ -69,7 +72,7 @@ def main(args=None):
                 ros_communicator.get_latest_data("depth_image") is not None
                 or ros_communicator.get_latest_data("depth_image_compress") is not None
             )
-            needs_depth = user_input == "1"
+            needs_depth = user_input in {"1", "4"}
             if not has_rgb or (needs_depth and not has_depth):
                 now = time.monotonic()
                 if now - last_wait_log > 5.0:
@@ -118,12 +121,25 @@ def main(args=None):
                 boundingbox_visualizer.save_fps_screenshot()
 
             elif user_input == "4":
+                target_label = image_processor.get_yolo_target_label()
+                use_segmentation = target_label in (None, "None", "bridge")
+                if use_segmentation:
+                    offsets_3d = (
+                        camera_geometry.calculate_segmentation_offset_from_crosshair_2d()
+                    )
+                else:
+                    offsets_3d = camera_geometry.calculate_offset_from_crosshair_2d()
                 boundingbox_visualizer.draw_bounding_boxes(
                     draw_crosshair=True,
                     screenshot=False,
-                    segmentation_status=True,
-                    bounding_status=False,
+                    segmentation_status=use_segmentation,
+                    bounding_status=not use_segmentation,
+                    offsets_3d_json=offsets_3d,
                 )
+                offset_msg = String()
+                offset_msg.data = offsets_3d
+                ros_communicator.publish_data("object_offset", offset_msg)
+                _publish_bridge_marker(ros_communicator, offsets_3d)
             else:
                 print("Invalid input.")
 
@@ -140,6 +156,21 @@ def main(args=None):
         if rclpy.ok():
             rclpy.shutdown()
         ros_thread.join()
+
+
+def _publish_bridge_marker(ros_communicator, offsets_3d_json):
+    try:
+        offsets = json.loads(offsets_3d_json)
+    except (TypeError, json.JSONDecodeError):
+        return
+
+    frame_id = str(ros_communicator.get_parameter("bridge_marker_frame_id").value)
+    marker_array = build_bridge_marker_array(
+        offsets,
+        ros_communicator.get_clock().now().to_msg(),
+        frame_id=frame_id,
+    )
+    ros_communicator.publish_data("bridge_marker", marker_array)
 
 
 if __name__ == "__main__":

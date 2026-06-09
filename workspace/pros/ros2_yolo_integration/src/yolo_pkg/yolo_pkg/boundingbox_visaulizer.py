@@ -38,19 +38,25 @@ class BoundingBoxVisualizer:
             offsets_data = json.loads(offsets_3d_json)
             if not offsets_data:
                 return False
-            detected_objects = self.yolo_bounding_box.get_tags_and_boxes()
-            if not detected_objects:
-                return False
-            label_to_box = {obj["label"]: obj["box"] for obj in detected_objects}
+            label_to_box = {}
+            if any("box" not in offset_obj for offset_obj in offsets_data):
+                detected_objects = self.yolo_bounding_box.get_tags_and_boxes()
+                label_to_box = {obj["label"]: obj["box"] for obj in detected_objects}
             for offset_obj in offsets_data:
                 label = offset_obj["label"]
                 offset = offset_obj.get("offset_flu")
-                if not offset or label not in label_to_box:
+                box = label_to_box.get(label, offset_obj.get("box"))
+                if not offset or not box or len(box) != 4:
                     continue
-                x1, y1, x2, y2 = label_to_box[label]
+                x1, y1, x2, y2 = [int(v) for v in box]
                 color = self._get_color_for_label(label)
-                center_x = (x1 + x2) // 2
-                center_y = (y1 + y2) // 2
+                mask_center = offset_obj.get("mask_center_px")
+                if mask_center and len(mask_center) == 2:
+                    center_x = int(mask_center[0])
+                    center_y = int(mask_center[1])
+                else:
+                    center_x = (x1 + x2) // 2
+                    center_y = (y1 + y2) // 2
                 cv2.circle(image, (center_x, center_y), 5, color, -1)
                 offset_text = f"F:{offset[0]}m L:{offset[1]}m U:{offset[2]}m"
                 text_y = y2 + 20

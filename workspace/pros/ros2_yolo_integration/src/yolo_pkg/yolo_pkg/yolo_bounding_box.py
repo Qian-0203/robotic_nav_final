@@ -67,6 +67,7 @@ class YoloBoundingBox:
         if confidence_threshold is None:
             confidence_threshold = self.get_confidence_threshold()
 
+        self.target_label = self.get_target_label()
         self.image = self.image_processor.get_rgb_cv_image()
         if self.image is None:
             print("Error: No image received from image_processor")
@@ -99,6 +100,8 @@ class YoloBoundingBox:
 
                 class_id = int(cls)
                 class_name = self.yolo_segmentation_model.names[class_id]
+                if self.target_label and class_name != self.target_label:
+                    continue
 
                 segmentation_objects.append(
                     {

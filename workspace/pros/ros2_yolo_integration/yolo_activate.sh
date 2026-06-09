@@ -1,6 +1,7 @@
 #!/bin/bash
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+AMD64_IMAGE="ros2_yolo_integration:ultralytics-8.4"
 
 PORT_MAPPING=""
 if [ "$1" = "--port" ] && [ -n "$2" ] && [ -n "$3" ]; then
@@ -42,7 +43,7 @@ elif [ "$ARCH" = "x86_64" ] || ([ "$ARCH" = "arm64" ] && [ "$OS" = "Darwin" ]); 
             -v "$SCRIPT_DIR/screenshots:/workspaces/screenshots" \
             -v "$SCRIPT_DIR/fps_screenshots:/workspaces/fps_screenshots" \
             -v "$SCRIPT_DIR/yolo_bringup.sh:/workspaces/yolo_bringup.sh" \
-            registry.screamtrumpet.csie.ncku.edu.tw/screamlab/pros_cameraapi:0.0.2 \
+            "$AMD64_IMAGE" \
             $CONTAINER_CMD "$@"
     else
         if grep -q 'device:[[:space:]]*["'\'']cpu["'\'']' "$SCRIPT_DIR/src/yolo_pkg/config/yolo_params.yaml"; then
@@ -55,7 +56,7 @@ elif [ "$ARCH" = "x86_64" ] || ([ "$ARCH" = "arm64" ] && [ "$OS" = "Darwin" ]); 
                 -v "$SCRIPT_DIR/screenshots:/workspaces/screenshots" \
                 -v "$SCRIPT_DIR/fps_screenshots:/workspaces/fps_screenshots" \
                 -v "$SCRIPT_DIR/yolo_bringup.sh:/workspaces/yolo_bringup.sh" \
-                registry.screamtrumpet.csie.ncku.edu.tw/screamlab/pros_cameraapi:0.0.2 \
+                "$AMD64_IMAGE" \
                 $CONTAINER_CMD "$@"
             exit $?
         fi
@@ -70,7 +71,7 @@ elif [ "$ARCH" = "x86_64" ] || ([ "$ARCH" = "arm64" ] && [ "$OS" = "Darwin" ]); 
             -v "$SCRIPT_DIR/screenshots:/workspaces/screenshots" \
             -v "$SCRIPT_DIR/fps_screenshots:/workspaces/fps_screenshots" \
             -v "$SCRIPT_DIR/yolo_bringup.sh:/workspaces/yolo_bringup.sh" \
-            registry.screamtrumpet.csie.ncku.edu.tw/screamlab/pros_cameraapi:0.0.2 \
+            "$AMD64_IMAGE" \
             $CONTAINER_CMD "$@"
 
         # If the GPU run fails, fall back to CPU mode.
@@ -84,7 +85,7 @@ elif [ "$ARCH" = "x86_64" ] || ([ "$ARCH" = "arm64" ] && [ "$OS" = "Darwin" ]); 
                 -v "$SCRIPT_DIR/screenshots:/workspaces/screenshots" \
                 -v "$SCRIPT_DIR/fps_screenshots:/workspaces/fps_screenshots" \
                 -v "$SCRIPT_DIR/yolo_bringup.sh:/workspaces/yolo_bringup.sh" \
-                registry.screamtrumpet.csie.ncku.edu.tw/screamlab/pros_cameraapi:0.0.2 \
+                "$AMD64_IMAGE" \
                 $CONTAINER_CMD "$@"
         fi
     fi

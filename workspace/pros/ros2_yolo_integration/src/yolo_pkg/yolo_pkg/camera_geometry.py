@@ -2,6 +2,7 @@ import numpy as np
 from yolo_pkg.camera_parameters import CameraParameters
 import json  # Import the json module
 import time
+from yolo_pkg.segmentation_geometry import build_segmentation_offsets
 
 
 class CameraGeometry:
@@ -38,6 +39,24 @@ class CameraGeometry:
             list: 每個物體的 {'label': str, 'offset_flu': np.ndarray([x, y, z])} 列表。
         """
         return self._process_objects(self._calculate_offset_flu, "offset_flu")
+
+    def calculate_segmentation_offset_from_crosshair_2d(self):
+        intrinsics = {
+            "fx": self.camera_intrinsics["fx"],
+            "fy": self.camera_intrinsics["fy"],
+            "cx": self.camera_intrinsics["cx"],
+            "cy": self.camera_intrinsics["cy"],
+        }
+        segmentation_objects = (
+            self.yolo_depth_extractor.yolo_boundingbox.get_segmentation_data()
+        )
+        depth_image = self.yolo_depth_extractor.image_processor.get_depth_cv_image()
+        offsets = build_segmentation_offsets(
+            segmentation_objects,
+            depth_image,
+            intrinsics,
+        )
+        return json.dumps(offsets)
 
     def _calculate_offset_flu(self, x, y, depth, fx, fy, cx, cy):
         """

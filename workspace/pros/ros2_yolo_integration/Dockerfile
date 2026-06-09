@@ -1,5 +1,5 @@
 # 使用 ultralytics 的 Jetson JetPack 6 映像作為基底
-FROM ultralytics/ultralytics:latest-jetson-jetpack6
+FROM ultralytics/ultralytics:8.4.45-jetson-jetpack6
 
 # 設定環境變數
 ENV DEBIAN_FRONTEND=noninteractive
@@ -59,6 +59,9 @@ RUN echo "source /opt/ros/${ROS_DISTRO}/setup.bash" >> ~/.bashrc && \
 
 # **升級 setuptools，確保與 Humble 相容**
 RUN python3 -m pip install --no-cache-dir --upgrade setuptools==58.2.0
+
+# Match the version used to export the bundled segmentation checkpoint.
+RUN python3 -m pip install --no-cache-dir "ultralytics==8.4.45"
 
 # **新增 `r` 指令，讓使用者輸入 `r` 就能執行 colcon build**
 RUN echo 'alias r="cd /workspace && colcon build && source ./install/setup.bash"' >> ~/.bashrc
