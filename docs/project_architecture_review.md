@@ -1,277 +1,207 @@
-# Project Architecture Review
+# Project Architecture
 
-## Scope
-
-This review covers the current ROS 2 project structure, node communication, mission task orchestration, and Docker/container workflow.
+This document describes the current architecture of the repository after static
+inspection of the launch files, wrapper scripts, ROS package entry points, and
+mission configuration.
 
 ## Repository Structure
 
-- `workspace/pros/pros_app`: Docker Compose launch layer for SLAM, localization, navigation, cameras, lidar, rosbridge, Foxglove, Unity support, and topic bridging.
-- `workspace/pros/pros_car`: ROS 2 workspace for car control, arm control, mission orchestration, custom actions, and robot description.
-- `workspace/pros/ros2_yolo_integration`: ROS 2 workspace for YOLO object detection, depth projection, and ArUco depth detection.
-- `workspace/yolo_training`: Separate CUDA/YOLO training container.
+| Path | Role |
+| --- | --- |
+| `workspace/pros/pros_app` | Docker Compose launch layer for real and Unity sensors, SLAM, localization, Nav2, rosbridge/Foxglove, GPS, IMU, topic bridges, and map storage. |
+| `workspace/pros/pros_car` | ROS 2 workspace for car control, arm control, mission orchestration, custom actions, robot description, and serial hardware adapters. |
+| `workspace/pros/ros2_yolo_integration` | ROS 2 workspace for YOLO detection, bridge segmentation, object depth offsets, camera geometry, and ArUco depth detection. |
+| `workspace/yolo_training` | Separate YOLO training container; not part of runtime car bringup. |
+| `docs` | Workflow, architecture, real-vs-Unity split, node/topic graph, and migration notes. |
 
-## High-Level Runtime Architecture
+## High-Level Runtime
 
 ```mermaid
 flowchart LR
-    Unity[Unity / Real Robot Sensors]
-    Cameras[RGB + Depth Camera]
-    Lidar[Lidar]
-    IMU[IMU]
-
-    ProsApp[pros_app compose stack]
-    Nav2[SLAM / Localization / Nav2]
-    Car[pros_car control stack]
-    Yolo[YOLO + ArUco stack]
+    Unity[Unity Simulation]
+    Sensors[Real Sensors]
+    App[pros_app compose wrappers]
+    Nav[SLAM / AMCL / Nav2]
+    Perception[YOLO / ArUco]
     Mission[mission_task_node]
+    Car[car_control_node]
     Arm[arm_control_node]
-    Wheels[ESP32 wheel controllers]
+    Serial[Optional serial writers]
+    Hardware[Wheel and arm hardware]
+    Viewers[Foxglove / rosbridge]
 
-    Unity --> ProsApp
-    Cameras --> Yolo
-    Lidar --> ProsApp
-    IMU --> ProsApp
-    ProsApp --> Nav2
-    Nav2 --> Car
-    Yolo --> Mission
+    Unity --> App
+    Sensors --> App
+    App --> Nav
+    App --> Viewers
+    App --> Perception
+    Perception --> Mission
+    Nav --> Mission
+    Nav --> Car
     Mission --> Car
     Mission --> Arm
-    Car --> Wheels
-    Mission --> Wheels
-    Arm --> Wheels
+    Mission --> Serial
+    Car --> Serial
+    Arm --> Serial
+    Serial --> Hardware
 ```
 
-Important note: `mission_task_node` sometimes sends wheel commands directly to `car_C_front_wheel` and `car_C_rear_wheel`. This is useful for visual servoing, but it bypasses the car navigation action server and can compete with other nodes if more than one controller is active.
+The default demo path is Unity-oriented: `task_bringup.launch.py` enables the
+Unity arm republisher and disables the real wheel serial writer. The physical
+robot path enables `enable_car_c_writer:=true` and disables the Unity arm bridge.
 
-## Node Communication Diagram
+## Current Launch Flow
+
+```mermaid
+flowchart TD
+    User[User]
+    AppScript[pros_app shell script]
+    Compose[compose files in pros_app/docker/compose]
+    NavStack[SLAM / localization / navigation services]
+    CarScript[pros_car/car_control.sh --task]
+    TaskBringup[task_bringup.sh]
+    MissionLaunch[mission_task_pkg task_bringup.launch.py]
+    YoloScript[ros2_yolo_integration/yolo_activate_cu128.sh --task]
+    YoloBringup[yolo_bringup.sh]
+    YoloLaunch[yolo_pkg yolo_and_arucode.launch.py]
+
+    User --> AppScript --> Compose --> NavStack
+    User --> CarScript --> TaskBringup --> MissionLaunch
+    User --> YoloScript --> YoloBringup --> YoloLaunch
+```
+
+`task_bringup.sh` and `yolo_bringup.sh` both build their mounted workspaces
+inside the running container before launching ROS nodes. That is convenient for
+development, but slower than a prebuilt runtime image.
+
+## Main Runtime Nodes
+
+| Node or executable | Package | Started by | Purpose |
+| --- | --- | --- | --- |
+| `car_control_node` | `car_control_pkg` | `task_bringup.launch.py` | Car navigation/manual control logic and wheel command publisher. |
+| `arm_control_node` | `arm_control_pkg` | `task_bringup.launch.py` | Arm control and arm action server behavior. |
+| `unity_arm_republish_node` | `arm_control_pkg` | Optional in `task_bringup.launch.py` | Unity arm topic adaptation. |
+| `carC_writer` | `pros_car_py` | Optional in `task_bringup.launch.py` | Real wheel serial writer. |
+| `mission_task_node` | `mission_task_pkg` | `task_bringup.launch.py` | Mission action server and YAML-driven task executor. |
+| `mission_task_client` | `mission_task_pkg` | Manual CLI | Sends task IDs to `mission_task_server`. |
+| `yolo_detection_node` | `yolo_pkg` | `yolo_and_arucode.launch.py` | YOLO detection, object offsets, optional bridge segmentation output. |
+| `arucode_node` | `arucode_pkg` | Optional in `yolo_and_arucode.launch.py` | ArUco marker depth detection. |
+
+External nodes from `pros_app` compose files provide camera drivers, lidar
+drivers, image transport, SLAM Toolbox, AMCL, Nav2, scan matching, rosbridge,
+Foxglove bridge, and Unity adapters.
+
+## Mission Architecture
+
+`mission_task_node` is a ROS action server named `mission_task_server`. It
+validates the requested `task_id` against
+`mission_task_pkg/config/mission_trees.yaml` and executes a tree of reusable
+primitives.
 
 ```mermaid
 flowchart TD
     Client[mission_task_client]
-    Mission[mission_task_node<br/>ActionServer: mission_task_server]
+    Mission[mission_task_node]
+    Trees[mission_trees.yaml]
+    Waypoints[mission_waypoints.yaml]
+    Yolo[yolo_detection_node]
+    NavAction[nav_action_server]
+    ArmAction[arm_action_server]
+    Nav2[Nav2 / AMCL]
+    Wheels[wheel command topics]
 
-    Yolo[yolo_detection_node<br/>RosCommunicator]
-    Aruco[arucode_node]
-    NavAction[navigation_action_server_node<br/>ActionServer: nav_action_server]
-    CarBase[car_control_node<br/>BaseCarControlNode]
-    Manual[manual_control_node]
-    ArmAction[arm_action_server_node<br/>ActionServer: arm_action_server]
-    ArmCommute[arm_commute_node]
-    Nav2[Nav2 / AMCL / planner]
-    Camera[Camera topics]
-    WheelHW[Wheel hardware topics]
-
-    Client -- MissionTask action --> Mission
-    Mission -- NavGoal action --> NavAction
-    Mission -- ArmGoal action --> ArmAction
-    Mission -- /goal_pose PoseStamped --> Nav2
+    Client -- MissionTask goal --> Mission
+    Trees --> Mission
+    Waypoints --> Mission
+    Mission -- /target_label --> Yolo
+    Yolo -- /yolo/object/offset --> Mission
     Nav2 -- /amcl_pose --> Mission
-    Nav2 -- /amcl_pose --> CarBase
-    Nav2 -- /received_global_plan --> CarBase
-    Nav2 -- /cmd_vel --> CarBase
-
-    Mission -- /target_label String --> Yolo
-    Camera -- /out/compressed<br/>/camera/depth/image_raw --> Yolo
-    Yolo -- /yolo/object/offset String JSON --> Mission
-    Yolo -- /yolo/object/offset String JSON --> CarBase
-    Yolo -- /yolo/object/offset String JSON --> ArmCommute
-    Yolo -- /yolo/detection/compressed --> Viewers[Foxglove / RViz]
-
-    Camera -- /out/compressed<br/>/camera/depth/image_raw --> Aruco
-    Aruco -- /aruco/id100/depth_m --> ArmCommute
-
-    NavAction --> CarBase
-    Manual -- car_control_signal String --> CarBase
-    CarBase -- car_C_front_wheel Float32MultiArray --> WheelHW
-    CarBase -- car_C_rear_wheel Float32MultiArray --> WheelHW
-    Mission -- visual servo wheel commands --> WheelHW
-    ArmCommute -- arm trajectory topic --> ArmHW[Arm controller]
-```
-
-## Main Topics and Actions
-
-| Interface | Type | Producer | Consumer | Purpose |
-| --- | --- | --- | --- | --- |
-| `mission_task_server` | `MissionTask` action | `mission_task_node` | `mission_task_client` | Starts selectable missions. |
-| `nav_action_server` | `NavGoal` action | `navigation_action_server_node` | `mission_task_node` | Runs car navigation mode. |
-| `arm_action_server` | `ArmGoal` action | `arm_action_server_node` | `mission_task_node` | Runs arm automation modes. |
-| `/goal_pose` | `PoseStamped` | `mission_task_node`, Nav2 tools | Nav2, `car_control_node` | Navigation target. |
-| `/amcl_pose` | `PoseWithCovarianceStamped` | localization | mission, car, arm | Current robot pose. |
-| `/received_global_plan` | `Path` | Nav2/topic bridge | `car_control_node` | Path points used by custom navigation. |
-| `/cmd_vel` | `Twist` | Nav2 | `car_control_node` | Velocity command input, currently stored but not published to wheels in callback. |
-| `/target_label` | `String` | `mission_task_node` | YOLO node | Selects the object label to focus on. |
-| `/yolo/object/offset` | `String` JSON | YOLO node | mission, car, arm | Object offsets in FLU-like coordinates. |
-| `car_C_front_wheel` | `Float32MultiArray` | car, mission, arm | wheel controller | Front wheel speeds. |
-| `car_C_rear_wheel` | `Float32MultiArray` | car, mission, arm | wheel controller | Rear wheel speeds. |
-| `/aruco/id100/depth_m` | `Float32` | ArUco node | arm | Marker depth for arm behavior. |
-
-## Mission Flow
-
-`mission_task_node` now accepts `MissionTask` goals and validates `task_id`
-against the keys loaded from `mission_trees.yaml`. The task tree describes the
-sequence, while the Python node only implements reusable primitives such as
-navigation, target-label selection, detection waits, visual servoing, timed
-drive, and arm goals.
-
-```mermaid
-flowchart TD
-    Start[MissionTask goal received]
-    LoadTree[Select behavior tree from mission_trees.yaml]
-    Primitive[Run next primitive]
-    Prepare[Prepare configured initial pose]
-    SetLabel[Publish /target_label]
-    Detect[Wait for YOLO target offset]
-    DynamicGoal[Estimate target pose and publish stand-off /goal_pose]
-    SendNav[Send NavGoal: Manual_Nav]
-    Fallback[Fallback to configured waypoint/search]
-    Servo[Visual servo fine alignment]
-    BridgePreAlign[Bridge pre-align/yaw turn]
-    ArmGoal[Send ArmGoal mode]
-    TimedDrive[Timed wheel command]
-    ReturnStart[Return to configured start]
-    Stop[Publish STOP]
-    Done[Action success]
-    Fail[Action abort/cancel]
-
-    Start --> LoadTree
-    LoadTree -- unknown task_id --> Fail
-    LoadTree --> Primitive
-    Primitive --> Prepare
-    Primitive --> SetLabel
-    Primitive --> Detect
-    Primitive --> DynamicGoal
-    Primitive --> SendNav
-    Primitive --> Servo
-    Primitive --> BridgePreAlign
-    Primitive --> TimedDrive
-    Primitive --> ArmGoal
-    Primitive --> ReturnStart
-
-    Detect --> DynamicGoal --> SendNav
-    Detect -- timeout --> Fallback
-    DynamicGoal -- failed --> Fallback
-    SendNav -- failed --> Fallback
-    Fallback --> SendNav
-    Fallback --> Servo
-
-    Prepare --> Primitive
-    SetLabel --> Primitive
-    SendNav --> Primitive
-    Servo --> Primitive
-    BridgePreAlign --> Primitive
-    TimedDrive --> Primitive
-    ArmGoal --> Primitive
-    ReturnStart --> Primitive
-    ReturnStart --> Stop --> Done
-    TimedDrive --> Stop --> Done
-    ArmGoal --> Stop --> Done
-    Servo -- timeout --> Fail
+    Mission -- /initialpose and /goal_pose --> Nav2
+    Mission -- NavGoal --> NavAction
+    Mission -- ArmGoal --> ArmAction
+    Mission -- visual servo commands --> Wheels
 ```
 
 Current mission tasks:
 
-- `task1_bear`: prepare the start pose, retry bear dynamic approach plus visual servo alignment, `pickup_bear`, return to `start`, then `place_bear`.
-- `task2_bridge`: prepare the start pose, target `bridge`, wait for bridge segmentation, navigate to the bridge pre-align pose, conditionally yaw-turn for a 180-degree bridge, visual-servo bridge center, target `bear`, visual-servo the bear to center before climbing using YAML overrides, climb forward, run `pickup_bear`, drive forward down, return to `start`, then `place_bear`.
-- `task3_knob`: prepare the start pose, navigate through `knob_stage_1`, `knob_stage_2`, and `knob_stage_3`, target `knob`, visual-servo for grasp with a YAML depth override, run the `grasp_knob` arm unlock sequence, then timed-drive forward through the door with the fast `FORWARD` profile.
+| Task | Sequence |
+| --- | --- |
+| `task1_bear` | Prepare start pose, retry dynamic bear approach and visual servo, run `pickup_bear`, return to `start`, run `place_bear`. |
+| `task2_bridge` | Prepare start pose, detect bridge, pre-align, conditionally yaw-turn, align bridge, align bear, climb, pick up bear, descend, navigate through `bridge_return_midpoint`, return, place. |
+| `task3_knob` | Prepare start pose, navigate through three knob waypoints, target `knob`, visual-servo to `0.35 m`, run `grasp_knob`, timed-drive through the door. |
 
-## Architecture Review
+## Main Topics And Actions
 
-### What Is Working
+| Interface | Type | Producer | Consumer | Purpose |
+| --- | --- | --- | --- | --- |
+| `mission_task_server` | `MissionTask` action | `mission_task_node` | `mission_task_client` | Starts selectable missions. |
+| `nav_action_server` | `NavGoal` action | car navigation action server | `mission_task_node`, keyboard clients | Runs custom navigation modes. |
+| `arm_action_server` | `ArmGoal` action | arm action server | `mission_task_node`, keyboard clients | Runs arm automation modes. |
+| `/target_label` | `String` | `mission_task_node` | `yolo_detection_node` | Selects the object label YOLO should prioritize. |
+| `/yolo/object/offset` | JSON in `String` | `yolo_detection_node` | mission, car, arm | Object offsets used for approach and servo. |
+| `/yolo/detection/compressed` | compressed image | `yolo_detection_node` | visualization clients | Detection overlay stream. |
+| `/amcl_pose` | `PoseWithCovarianceStamped` | localization | mission, car, arm | Current localized pose. |
+| `/initialpose` | `PoseWithCovarianceStamped` | mission or user | AMCL | Initial localization pose. |
+| `/goal_pose` | `PoseStamped` | mission or user tools | Nav2, car control | Navigation goal. |
+| `/cmd_vel` | `Twist` | Nav2 | `car_control_node` | Optional wheel-control input when enabled. |
+| `car_C_front_wheel` | wheel command | car, mission, arm | serial writer / Unity | Front wheel command topic. |
+| `car_C_rear_wheel` | wheel command | car, mission, arm | serial writer / Unity | Rear wheel command topic. |
+| `/robot_arm` | arm command | arm control / Unity republisher | arm writer / Unity | Arm command topic. |
+| `/aruco/id100/depth_m` | `Float32` | ArUco node | arm control | Marker depth for arm behavior. |
 
-- The control split is understandable: `pros_app` brings up environment/navigation infrastructure, `pros_car` owns vehicle and arm actions, and YOLO publishes semantic object offsets.
-- Mission orchestration uses ROS actions for long-running car and arm work, which is the right abstraction for cancelable tasks.
-- The mission node centralizes task sequencing and exposes a small external API: one `task_id` action goal.
-- The YOLO interface is label-driven through `/target_label`, which lets missions reuse one perception node for different objects.
+For a more exhaustive graph, see `docs/node_topic_relation_diagram.md`.
 
-### Main Risks
+## Compose And Network Model
 
-- Multiple nodes can publish to `car_C_front_wheel` and `car_C_rear_wheel`: car control, mission visual servo, and arm commute. Without an arbiter, whichever publishes last wins.
-- `mission_task_node` publishes direct wheel commands while `navigation_action_server_node` and `manual_control_node` may also be alive in `task_bringup.launch.py`.
-- YOLO offset data is JSON inside `std_msgs/String`. This is flexible but weakly typed; malformed messages are only caught at runtime.
-- `yolo_pkg.main` waits for terminal menu input. That is awkward for launch/compose workflows and should be replaced with ROS parameters.
-- `car_control_node.cmd_vel_callback` computes wheel speeds but does not publish them. If `/cmd_vel` is meant to drive wheels, the behavior is incomplete; if it is only telemetry, the naming is misleading.
-- `task_bringup.sh` runs `colcon build` every container start. This is convenient for development but slow and less deterministic for mission demos.
-- `pros_app` has many small compose files and wrapper scripts with duplicated patterns. The workflow is flexible, but the entrypoint is hard to reason about.
+The active compose files use an external Docker network named
+`compose_my_bridge_network`. The shell wrappers use either `docker-compose` or
+`docker compose`, depending on what is installed.
 
-## Container and Workflow Review
+Current `pros_app` wrappers:
 
-### Current Workflow
+| Workflow | Scripts |
+| --- | --- |
+| Unity | `slam_unity.sh`, `localization_unity.sh`, `camera_calibration_unity.sh` |
+| RPLidar | `slam.sh`, `localization.sh` |
+| YDLidar | `slam_ydlidar.sh`, `localization_ydlidar.sh` |
+| ORadar | `slam_oradarlidar.sh`, `localization_oradarlidar.sh` |
+| Cameras | `camera_astra.sh`, `camera_dabai.sh`, `camera_gemini.sh`, `camera_calibration.sh` |
+| Support | `gps.sh`, `imu.sh`, `rosbridge_server.sh`, `ros_topic_bridge.sh`, `store_map.sh` |
 
-```mermaid
-flowchart LR
-    User[User]
-    Menu[pros_app/control.sh menu]
-    Scripts[Mode scripts<br/>slam/localization/camera/navigation]
-    Compose[Multiple docker-compose_*.yml files]
-    Containers[ROS containers]
-    CarCompose[pros_car/docker-compose_car_control.yml]
-    BuildAtStart[task_bringup.sh<br/>colcon build]
+`control.sh` is a convenience menu but does not expose every script in the
+folder. Direct script execution is the clearest workflow for demos.
 
-    User --> Menu --> Scripts --> Compose --> Containers
-    User --> CarCompose --> BuildAtStart --> Containers
-```
+## Current Technical Risks
 
-### Container Findings
-
-- Compose files in `pros_app/docker/compose` consistently use the external network `compose_my_bridge_network`. `pros_car/docker-compose_car_control.yml` uses the same network, so inter-container ROS discovery can work if this network exists.
-- The README mentions `pros_app_my_bridge_network`, but the active compose files use `compose_my_bridge_network`. This naming mismatch should be corrected.
-- `pros_car/Dockerfile` is a development image that installs requirements but leaves source mounted and built at runtime.
-- `pros_app/docker/Dockerfile` appears fragile: lines 17-22 and 26-35 use line continuations with blank continuation lines. It should be rebuilt or linted before relying on it.
-- `pros_app/control.sh` only lists some scripts; newer scripts such as `camera_gemini.sh`, `imu.sh`, `ros_topic_bridge.sh`, `slam_oradarlidar.sh`, and `localization_oradarlidar.sh` exist but are not all exposed.
-- `utils.sh` starts each compose file separately, which means compose project naming is determined per file. This can work, but it makes lifecycle management harder than a single profile-based compose project.
-
-## Recommended Clean Workflow
-
-Use one top-level compose project with profiles:
-
-```text
-profiles:
-  unity-base: robot_bringup, lidar_transformer, ros_topic_bridge
-  real-base: lidar, camera, imu, gps
-  slam: slam, rosbridge, foxglove
-  localization: localization, navigation, rosbridge, foxglove
-  mission: car_control, arm_control, mission_task
-  perception: yolo, aruco
-```
-
-Target commands:
-
-```bash
-docker network create --driver bridge compose_my_bridge_network
-docker compose --profile unity-base --profile localization --profile perception --profile mission up
-docker compose --profile slam up
-docker compose down
-```
-
-For development:
-
-```bash
-docker compose --profile mission up car-dev
-docker compose exec car-dev colcon build --symlink-install
-```
-
-For demos:
-
-```bash
-docker compose --profile mission up car-runtime
-```
-
-The clean separation is:
-
-- `car-dev`: bind-mount `src`, run `colcon build` manually or through a dev command.
-- `car-runtime`: image already contains built packages and starts `ros2 launch mission_task_pkg task_bringup.launch.py`.
-- `pros_app`: infrastructure services only.
-- `pros_car`: mission/control services only.
-- `ros2_yolo_integration`: perception services only.
+- Multiple nodes can publish to `car_C_front_wheel` and `car_C_rear_wheel`.
+  Mission visual servo, car control, and arm behavior can compete unless only
+  the intended controller is active.
+- `enable_cmd_vel_wheel_control` is disabled by default. Enabling it while a
+  mission is publishing direct visual-servo wheel commands can cause command
+  contention.
+- `/yolo/object/offset` is JSON inside `std_msgs/String`. This is flexible but
+  weakly typed; schema mistakes are caught only at runtime.
+- The car writer path and newer wheel command publishers should be checked
+  together before real hardware demos, because older code paths may expect a
+  different message representation.
+- `task_bringup.sh` and `yolo_bringup.sh` rebuild workspaces on startup. This is
+  useful during development but can slow demos and hide dependency drift.
+- The compose layer is flexible but fragmented across many small files. A
+  single profile-based compose project would be easier to start, stop, and
+  document.
 
 ## Recommended Next Refactors
 
-1. Add a wheel command arbiter node and make mission, manual, nav, and arm publish intent commands instead of direct wheel hardware commands.
-2. Replace YOLO JSON `String` with a custom message, for example `DetectedObjectArray`, or at minimum define a shared schema module.
-3. Convert YOLO menu mode to ROS parameters so it runs cleanly from launch and compose.
-4. Move `colcon build` out of demo startup. Keep runtime containers prebuilt; keep bind-mount builds for development only.
-5. Consolidate compose files using profiles or shared YAML anchors for image, env, network, and common volumes.
-6. Fix network documentation so the README and compose files agree on `compose_my_bridge_network`.
-7. Add launch files for complete scenarios: `unity_mission.launch.py`, `real_mission.launch.py`, and `perception.launch.py`.
-8. Add health checks or startup validation for required topics: `/amcl_pose`, `/received_global_plan`, camera topics, `/yolo/object/offset`, and wheel controller topics.
+1. Add a wheel command arbiter so navigation, mission servo, manual control, and
+   arm behavior publish intent rather than directly competing on hardware
+   topics.
+2. Replace YOLO JSON strings with a typed custom message, or centralize and test
+   the JSON schema.
+3. Split development and demo startup: keep bind-mount rebuilds for development,
+   and provide prebuilt runtime images for demos.
+4. Consolidate `pros_app` compose files with shared anchors or profiles for
+   common image, network, environment, and volume settings.
+5. Add scenario-level launch commands for `unity_mission`, `real_mission`, and
+   `perception`.
+6. Add startup checks for required topics such as `/amcl_pose`, `/goal_pose`,
+   camera streams, `/yolo/object/offset`, and wheel command topics.

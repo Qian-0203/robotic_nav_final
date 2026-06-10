@@ -1,139 +1,150 @@
-# YOLO Servo Mission Workflow
+# Final Project Workflow
 
-This document explains how to run the YOLO-guided mission stack and what the
-mission node does during a task.
+This runbook describes the current mission workflow for the PROS navigation
+project. The active runtime is ROS 2 Humble in Docker containers.
 
-## Big Picture
+## Runtime Pieces
 
-The system has three parts:
+| Stack | Path | Role |
+| --- | --- | --- |
+| `pros_app` | `workspace/pros/pros_app` | Starts Unity or real sensor infrastructure, SLAM/localization, Nav2, rosbridge/Foxglove, and support bridges. |
+| `pros_car` | `workspace/pros/pros_car` | Starts car control, arm control, optional serial writers, and the mission action server. |
+| `ros2_yolo_integration` | `workspace/pros/ros2_yolo_integration` | Starts YOLO detection, bridge segmentation, object offsets, and optional ArUco detection. |
 
-- `pros_app`: localization, navigation, rosbridge, Foxglove, and Unity support.
-- `pros_car`: car control, arm control, action servers, and mission logic.
-- `ros2_yolo_integration`: YOLO perception and object depth offsets.
+All runtime containers should use the external Docker network
+`compose_my_bridge_network`:
 
-The important runtime loop is:
+```bash
+docker network create --driver bridge compose_my_bridge_network
+```
 
-1. YOLO publishes object offsets on `/yolo/object/offset`.
-2. `mission_task_node` selects a task from `mission_trees.yaml`.
-3. The mission publishes `/target_label` so YOLO focuses on the needed object.
-4. The mission publishes `/goal_pose` and asks `nav_action_server` to run
-   `Manual_Nav` for coarse navigation.
-5. The mission uses slow direct wheel commands for final visual alignment.
-6. The mission asks `arm_action_server` to run pickup, place, or grasp actions.
+## Unity Mission Workflow
 
-All containers should be on the shared Docker network
-`compose_my_bridge_network`.
-
-## Start The Stack
-
-Start localization and navigation first:
+Start localization and navigation for Unity:
 
 ```bash
 cd workspace/pros/pros_app
 ./localization_unity.sh
 ```
 
-This also starts rosbridge on port `9090` and Foxglove bridge on port `8765`.
-Do not start `rosbridge_server.sh` at the same time.
+This starts the Unity robot bringup plus Unity localization/navigation compose
+files. Do not start a second localization stack at the same time.
 
-Start the car, arm, and mission stack:
+Start the mission/control stack:
 
 ```bash
 cd workspace/pros/pros_car
-./car_control.sh --task stage:=mission
+./car_control.sh --task stage:=mission enable_unity_arm_bridge:=true enable_car_c_writer:=false
 ```
 
-Start YOLO perception:
+Start YOLO in mission mode:
 
 ```bash
 cd workspace/pros/ros2_yolo_integration
 ./yolo_activate_cu128.sh --task yolo_mode:=1 enable_arucode:=false
 ```
 
-`yolo_mode:=1` is the mode used by missions because it publishes
-`/yolo/object/offset`.
+`yolo_mode:=1` publishes bounding boxes and `/yolo/object/offset`. Use
+`yolo_mode:=4` when bridge segmentation is needed for bridge TF/marker output.
+
+## Real Robot Mission Workflow
+
+Start the real localization/navigation stack for the installed lidar:
+
+```bash
+cd workspace/pros/pros_app
+./localization.sh                # RPLidar
+# ./localization_ydlidar.sh      # YDLidar
+# ./localization_oradarlidar.sh  # ORadar
+```
+
+Start the physical camera used by YOLO:
+
+```bash
+cd workspace/pros/pros_app
+./camera_gemini.sh
+# ./camera_astra.sh
+# ./camera_dabai.sh
+```
+
+Start the mission stack with the real wheel writer enabled:
+
+```bash
+cd workspace/pros/pros_car
+./car_control.sh --task stage:=mission enable_unity_arm_bridge:=false enable_car_c_writer:=true
+```
+
+The current mission launch starts `car_control_node`, `arm_control_node`, and
+`mission_task_node`. It does not start the real arm serial writer; start the arm
+writer separately if the physical arm needs serial output.
 
 ## Send A Mission
 
-Enter the car container:
+Enter the running car container and source the workspace:
 
 ```bash
 docker exec -it pros_car bash
-```
-
-Source ROS and send one task:
-
-```bash
 cd /workspaces
 source /opt/ros/${ROS_DISTRO:-humble}/setup.bash
 source install/setup.bash
+```
 
+Send one mission:
+
+```bash
 ros2 run mission_task_pkg mission_task_client task1_bear
 ```
 
 Supported task IDs:
 
-- `task1_bear`
-- `task2_bridge`
-- `task3_knob`
+| Task | Behavior |
+| --- | --- |
+| `task1_bear` | Prepare start pose, dynamically approach the bear, visual-servo for pickup, run `pickup_bear`, return to `start`, and run `place_bear`. |
+| `task2_bridge` | Detect bridge, pre-align, handle bridge yaw, visual-servo the bridge and bear, climb, pick up bear, descend, return, and place. |
+| `task3_knob` | Navigate through `knob_stage_1`, `knob_stage_2`, and `knob_stage_3`, align to the knob, run `grasp_knob`, and drive through the door. |
 
-```bash
-colcon build --symlink-install --packages-up-to mission_task_pkg
-```
+## Launch Arguments
 
+`mission_task_pkg task_bringup.launch.py`:
 
-## What Each Task Does
+| Argument | Default | Meaning |
+| --- | --- | --- |
+| `stage` | `mission` | Only `mission` is currently supported. |
+| `enable_unity_arm_bridge` | `true` | Starts `unity_arm_republish_node`. Disable for real hardware unless needed. |
+| `enable_car_c_writer` | `false` | Starts the real wheel serial writer. Enable for the physical robot. |
+| `enable_cmd_vel_wheel_control` | `false` | Allows `car_control_node` to convert `/cmd_vel` directly to wheel commands. Keep disabled during mission visual servo unless explicitly testing it. |
+| `waypoints_file` | empty | Optional override for `mission_waypoints.yaml`. |
+| `mission_trees_file` | empty | Optional override for `mission_trees.yaml`. |
 
-Tasks are defined in
-`workspace/pros/pros_car/src/mission_task_pkg/config/mission_trees.yaml`.
-The Python node does not hard-code the full task sequence anymore. It only runs
-small reusable primitives.
+`yolo_pkg yolo_and_arucode.launch.py`:
 
-`task1_bear`:
+| Argument | Default | Meaning |
+| --- | --- | --- |
+| `enable_yolo` | `true` | Starts `yolo_detection_node`. |
+| `enable_arucode` | `false` | Starts `arucode_node`. |
+| `yolo_mode` | `1` | `1` boxes and offsets, `2` screenshots, `3` 5 FPS screenshots, `4` segmentation, `interactive` terminal prompt. |
 
-1. Publish the configured initial pose.
-2. Approach the bear with YOLO-guided navigation.
-3. Visual-servo until the bear is aligned for pickup.
-4. Run arm mode `pickup_bear`.
-5. Navigate back to waypoint `start`.
-6. Run arm mode `place_bear`.
+## Mission Data Flow
 
-`task2_bridge`:
+1. `mission_task_client` sends a task ID to `mission_task_server`.
+2. `mission_task_node` loads the task sequence from `mission_trees.yaml`.
+3. The mission publishes `/target_label` so YOLO focuses on the needed object.
+4. YOLO publishes JSON object offsets on `/yolo/object/offset`.
+5. The mission publishes `/initialpose` and `/goal_pose` as needed.
+6. The mission calls `nav_action_server` for coarse navigation.
+7. The mission publishes direct wheel commands for fine visual servo.
+8. The mission calls `arm_action_server` for pickup, place, and knob actions.
 
-1. Publish the configured initial pose.
-2. Set YOLO target label to `bridge`.
-3. Wait for bridge detection.
-4. Navigate to the bridge pre-align pose using the bridge TF origin offset.
-5. If the bridge yaw is detected as 180 degrees, rotate counterclockwise for
-   `bridge_yaw_180_turn_sec`.
-6. Visual-servo to the bridge center using the overrides in
-   `config/mission_trees.yaml`.
-7. Set YOLO target label to `bear`.
-8. Wait for the bear before climbing.
-9. Visual-servo the bear to the image center before climbing using the
-   overrides in `config/mission_trees.yaml`, so practical completion can be
-   tuned from YAML rather than code.
-10. Drive forward for `bridge_climb_sec`.
-11. Run arm mode `pickup_bear`.
-12. Drive forward for `bridge_descend_sec`.
-13. Navigate back to waypoint `start`.
-14. Run arm mode `place_bear`.
+## Configuration Files
 
-`task3_knob`:
+| File | Purpose |
+| --- | --- |
+| `workspace/pros/pros_car/src/mission_task_pkg/config/mission_trees.yaml` | Mission task behavior trees and per-step overrides. |
+| `workspace/pros/pros_car/src/mission_task_pkg/config/mission_waypoints.yaml` | Initial pose, waypoints, dynamic approach settings, and visual-servo timing. |
+| `workspace/pros/pros_car/src/arm_control_pkg/config/arm_config.yaml` | Arm poses and arm automation settings. |
+| `workspace/pros/ros2_yolo_integration/src/yolo_pkg/config/yolo_params.yaml` | Camera topics, YOLO model package, model paths, labels, and device setting. |
 
-1. Publish the configured initial pose.
-2. Navigate to `knob_stage_1`.
-3. Navigate to `knob_stage_2`.
-4. Navigate to `knob_stage_3`.
-5. Set YOLO target label to `knob`.
-6. Visual-servo until the knob is aligned for grasp using the per-step
-   `target_depth_m` override in `config/mission_trees.yaml`.
-7. Run arm mode `grasp_knob`, which sends
-   `knob_pre_grasp -> knob_grasp`, closes the gripper, moves down by the
-   configured step count, then sends `knob_unlock`.
-8. Drive forward with the fast `FORWARD` profile for `door_enter_sec`.
-
-Current Task 3 knob tuning:
+Current Task 3 defaults:
 
 | Setting | Value |
 | --- | --- |
@@ -143,95 +154,10 @@ Current Task 3 knob tuning:
 | knob visual-servo depth | `0.35 m` |
 | door entry drive | `FORWARD` for `20.0 s` |
 
-## How YOLO-Guided Approach Works
-
-For an `ApproachDetectedTarget` step, the mission node uses this flow:
-
-1. Publish `/target_label`.
-2. Wait for a matching YOLO detection on `/yolo/object/offset`.
-3. Read the current robot pose from `/amcl_pose`.
-4. Convert the YOLO `offset_flu = [forward, left, up]` into a target position
-   in the `map` frame.
-5. Publish a stand-off `/goal_pose`.
-6. Send `Manual_Nav` to `nav_action_server`.
-7. If dynamic approach fails, use the configured fallback waypoint or search.
-
-The configured stand-off distances live in `config/mission_waypoints.yaml`
-under `dynamic_approach.standoff_m`.
-
-For `bear`, short-hop approach is enabled. Instead of sending one long dynamic
-goal, the mission can navigate in smaller steps and refresh the detection
-between hops. If no bear detection matching the configured confidence and
-refresh timeout is found, the mission stops rotation and falls back to the
-configured `bear_approach` waypoint.
-
-## Visual Servo
-
-Visual servo is the fine alignment stage after navigation or detection. It publishes
-direct wheel speeds to:
-
-- `car_C_front_wheel`
-- `car_C_rear_wheel`
-
-If the bear is still not detected during this stage, the chassis rotates
-counterclockwise while looking for it.
-
-Current tuning lives in `config/mission_waypoints.yaml` under `visual_servo`.
-Per-step VisualServo overrides live in `config/mission_trees.yaml`, so target
-depth, lateral/depth tolerances, timing, bear confidence, recovery, timeout, and
-speed profile can be adjusted from YAML.
-
-The servo logic is simple:
-
-- Target is left of center: rotate counterclockwise.
-- Target is right of center: rotate clockwise.
-- Target is centered but too far away: drive forward slowly.
-- Bear is at target depth but outside lateral tolerance: drive backward briefly,
-  then retry alignment.
-- Target is centered and close enough: stop.
-- Target is missing: rotate slowly until it is found or timeout expires.
-
-## Main Topics And Actions
-
-| Interface | Role |
-| --- | --- |
-| `mission_task_server` | Receives high-level task goals. |
-| `nav_action_server` | Runs `Manual_Nav` after `/goal_pose` is published. |
-| `arm_action_server` | Runs arm modes such as `pickup_bear`. |
-| `/target_label` | Tells YOLO which object to prioritize. |
-| `/yolo/object/offset` | YOLO object offsets as JSON. |
-| `/amcl_pose` | Current localized robot pose. |
-| `/goal_pose` | Navigation target for Nav2 and car control. |
-| `car_C_front_wheel` | Front wheel speed command. |
-| `car_C_rear_wheel` | Rear wheel speed command. |
-
-## Useful Launch Arguments
-
-`mission_task_pkg task_bringup.launch.py`:
-
-| Argument | Meaning |
-| --- | --- |
-| `stage:=mission` | Starts car, arm, and mission nodes. |
-| `enable_unity_arm_bridge:=true|false` | Starts or disables Unity arm republish. |
-| `enable_car_c_writer:=true|false` | Starts or disables the real wheel serial writer. |
-| `waypoints_file:=/path/to/file.yaml` | Overrides `mission_waypoints.yaml`. |
-| `mission_trees_file:=/path/to/file.yaml` | Overrides `mission_trees.yaml`. |
-
-`yolo_pkg yolo_and_arucode.launch.py`:
-
-| Argument | Meaning |
-| --- | --- |
-| `enable_yolo:=true|false` | Starts YOLO detection. |
-| `enable_arucode:=true|false` | Starts ArUco detection. |
-| `yolo_mode:=1` | Bounding boxes plus `/yolo/object/offset`. |
-| `yolo_mode:=2` | Bounding boxes plus screenshots. |
-| `yolo_mode:=3` | 5 FPS screenshots. |
-| `yolo_mode:=4` | Segmentation. |
-| `yolo_mode:=interactive` | Restores the old terminal menu. |
-
 ## Manual Navigation Smoke Test
 
-Use this when you want to check navigation without YOLO or the mission client:
+Use this inside the car container when checking Nav2 and car control without a
+mission client:
 
 ```bash
 ros2 topic pub --once /initialpose geometry_msgs/msg/PoseWithCovarianceStamped "
@@ -259,45 +185,20 @@ pose:
 ros2 action send_goal /nav_action_server action_interface/action/NavGoal "{mode: Manual_Nav}"
 ```
 
-## Debug Checklist
+## Rebuild Shortcuts
 
-Check whether YOLO is publishing detections:
+The bringup scripts build the full mounted workspace at startup. For focused
+development, enter the container and rebuild only what changed:
 
 ```bash
-ros2 topic echo /yolo/object/offset
+cd /workspaces
+source /opt/ros/${ROS_DISTRO:-humble}/setup.bash
+colcon build --symlink-install --packages-select mission_task_pkg
+source install/setup.bash
 ```
 
-Check what YOLO target the mission requested:
+If a dependency changed, use:
 
 ```bash
-ros2 topic echo /target_label
-```
-
-Check wheel publishers if wheel speed flickers or the robot stops unexpectedly:
-
-```bash
-ros2 topic info -v /car_C_front_wheel
-ros2 topic info -v /car_C_rear_wheel
-```
-
-During mission bringup, these nodes may publish wheel commands:
-
-- `car_control_node`
-- `mission_task_node`
-- `arm_control_node`
-
-The mission node only publishes wheel commands during visual servo, timed drive,
-or stop commands. Coarse movement should go through `/goal_pose` plus
-`nav_action_server`.
-
-Check the current navigation goal:
-
-```bash
-ros2 topic echo /goal_pose
-```
-
-Check the robot pose used for dynamic target estimation:
-
-```bash
-ros2 topic echo /amcl_pose
+colcon build --symlink-install --packages-up-to mission_task_pkg
 ```
