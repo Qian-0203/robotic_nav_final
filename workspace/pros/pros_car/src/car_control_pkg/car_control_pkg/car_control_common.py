@@ -10,7 +10,7 @@ import json
 
 
 MISSION_ACTION_MAPPINGS = {
-    "FORWARD": [200.0, 200.0, 200.0, 200.0],
+    "FORWARD": [300.0, 300.0, 300.0, 300.0],
     "COUNTERCLOCKWISE_ROTATION": [-300.0, 300.0, -300.0, 300.0],
     "CLOCKWISE_ROTATION": [300.0, -300.0, 300.0, -300.0],
     "FORWARD_SLOW": [100.0, 100.0, 100.0, 100.0],
@@ -97,6 +97,8 @@ class CarControlPublishers:
 class BaseCarControlNode(Node):
     """Base class for car control nodes providing common functionality"""
 
+    DIRECT_CONTROL_CMD_VEL_TIMEOUT_SEC = 1.0
+
     def __init__(self, node_name, enable_nav_subscribers=False):
         super().__init__(node_name)
         self.declare_parameter("object_nav_label", "bear")
@@ -124,6 +126,7 @@ class BaseCarControlNode(Node):
         self.latest_yolo_info = None
         self.latest_cmd_vel = None
         self.custom_nav_active = False
+        self.last_direct_control_time = None
 
         # Create navigation data subscribers if enabled
         if enable_nav_subscribers:
@@ -312,9 +315,6 @@ class BaseCarControlNode(Node):
         return None, None
 
     def cmd_vel_callback(self, msg: Twist):
-        if self.custom_nav_active:
-            return
-
         wheel_distance = 0.5
         max_speed = 30.0
         min_speed = -30.0
@@ -328,7 +328,7 @@ class BaseCarControlNode(Node):
         v_right = max(min_speed, min(max_speed, v_right))
 
         self.latest_cmd_vel = [v_left, v_right]
-        if not self.get_parameter("enable_cmd_vel_wheel_control").value:
+        if not self._can_apply_cmd_vel_control():
             return
 
         self.publish_control([v_left, v_right])
@@ -338,6 +338,28 @@ class BaseCarControlNode(Node):
 
     def set_custom_nav_active(self, active: bool):
         self.custom_nav_active = active
+
+    def _mark_direct_control_active(self):
+        self.last_direct_control_time = self.get_clock().now()
+
+    def _direct_control_override_active(self):
+        if self.last_direct_control_time is None:
+            return False
+
+        elapsed = self.get_clock().now() - self.last_direct_control_time
+        return (
+            elapsed.nanoseconds
+            < self.DIRECT_CONTROL_CMD_VEL_TIMEOUT_SEC * 1_000_000_000
+        )
+
+    def _can_apply_cmd_vel_control(self):
+        if not self.get_parameter("enable_cmd_vel_wheel_control").value:
+            return False
+        if self.custom_nav_active:
+            return False
+        if self._direct_control_override_active():
+            return False
+        return True
 
     def get_path_points(self, include_orientation=True):
         path_points = []
@@ -384,12 +406,14 @@ class BaseCarControlNode(Node):
             if action not in MISSION_ACTION_MAPPINGS:
                 self.get_logger().warn(f"Unknown mission control action: {action}")
                 return
+            self._mark_direct_control_active()
             self.publish_control(MISSION_ACTION_MAPPINGS[action])
         elif mode == "Manual_Control":
             action = MANUAL_KEY_ACTIONS.get(command.lower())
             if action is None:
                 return
             self.get_logger().info(f"Manual control command received: {action}")
+            self._mark_direct_control_active()
             self.publish_control(action)
         elif mode == "Raw_Control":
             try:
@@ -401,4 +425,5 @@ class BaseCarControlNode(Node):
                 self.get_logger().warn(f"Raw control needs 4 values, got {len(vel)}")
                 return
             self.get_logger().info(f"Raw control command received: {vel}")
+            self._mark_direct_control_active()
             self.publish_control(vel)

@@ -32,17 +32,18 @@ task2_bridge:
     - type: ApproachBridgePreAlign
       label: bridge
       phase: approach_bridge_y_offset
-    - type: ApproachBridgePreAlign
-      label: bridge
-      phase: approach_bridge_tf_point
-      offset_m: 0.0
+    - type: ConditionalBridgeYawTurn
+      phase: bridge_yaw_180_ccw_turn
+      action: COUNTERCLOCKWISE_ROTATION
+      config_key: bridge_yaw_180_turn_sec
     - type: VisualServo
       label: bridge
       phase: align_bridge_center
-      target_depth: 0.8
+      lateral_tolerance_m: 0.05
+      target_depth_m: 1.5
     - type: TimedDrive
       phase: climb_bridge
-      action: FORWARD_SLOW
+      action: FORWARD
       config_key: bridge_climb_sec
     - type: SetTargetLabel
       label: bear

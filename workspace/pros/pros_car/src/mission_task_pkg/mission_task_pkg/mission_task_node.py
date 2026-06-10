@@ -13,7 +13,6 @@ from geometry_msgs.msg import PoseWithCovarianceStamped
 from mission_task_pkg.behavior_tree import BehaviorTreeRunner
 from mission_task_pkg.mission_geometry import (
     compute_dynamic_goal,
-    normalize_angle,
     select_detection,
     yaw_from_quaternion,
 )
@@ -24,7 +23,7 @@ from std_msgs.msg import String
 
 
 ACTION_MAPPINGS = {
-    "FORWARD": [200.0, 200.0, 200.0, 200.0],
+    "FORWARD": [300.0, 300.0, 300.0, 300.0],
     "COUNTERCLOCKWISE_ROTATION": [-300.0, 300.0, -300.0, 300.0],
     "CLOCKWISE_ROTATION": [300.0, -300.0, 300.0, -300.0],
     "FORWARD_SLOW": [100.0, 100.0, 100.0, 100.0],
@@ -73,7 +72,8 @@ class MissionTaskNode(Node):
         self._last_control_action = None
         self._last_control_log_time = 0.0
         self._last_control_log_action = None
-        self._last_bridge_tf_goal_pose = None
+        self._last_bridge_edge_log_time = 0.0
+        self._last_bridge_tf_yaw = None
         self.latest_amcl_pose = None
         self.create_subscription(
             String, "/yolo/object/offset", self._object_offset_callback, 10
@@ -197,7 +197,8 @@ class MissionTaskNode(Node):
                 goal_handle,
                 node["label"],
                 node.get("phase", f"align_{node['label']}"),
-                target_depth=node.get("target_depth"),
+                target_depth=node.get("target_depth", node.get("target_depth_m")),
+                lateral_tolerance=node.get("lateral_tolerance_m"),
                 timeout_sec=node.get("timeout_sec"),
                 allow_missing=bool(node.get("allow_missing", False)),
             )
@@ -208,6 +209,14 @@ class MissionTaskNode(Node):
                 node.get("label", "bridge"),
                 node.get("phase", "approach_bridge_y_offset"),
                 node.get("offset_m"),
+            )
+            return
+        if node_type == "ConditionalBridgeYawTurn":
+            self._conditional_bridge_yaw_turn(
+                goal_handle,
+                node.get("phase", "bridge_yaw_180_ccw_turn"),
+                node.get("action", "COUNTERCLOCKWISE_ROTATION_SLOW"),
+                node.get("config_key", "bridge_yaw_180_turn_sec"),
             )
             return
         if node_type == "TimedDrive":
@@ -272,6 +281,29 @@ class MissionTaskNode(Node):
         start = time.monotonic()
         while time.monotonic() - start < timeout:
             self._check_cancel(goal_handle)
+            if label == "bridge":
+                detection = self._best_full_detection(label, min_confidence)
+                if detection is not None:
+                    touching_edges = self._mask_touching_edges(detection)
+                    if not touching_edges:
+                        self.get_logger().info(
+                            f"Selected {label} detection: "
+                            f"confidence={float(detection.get('confidence', 0.0)):.3f} "
+                            f"offset_flu={detection.get('offset_flu')}"
+                        )
+                        return {
+                            "confidence": float(detection.get("confidence", 0.0)),
+                            "offset_flu": [float(v) for v in detection["offset_flu"]],
+                        }
+                    action = self._bridge_edge_recovery_action(
+                        detection,
+                        touching_edges,
+                    )
+                    self._log_bridge_edge_recovery(touching_edges, action)
+                    self._publish_control(action)
+                    time.sleep(0.1)
+                    continue
+
             detection = select_detection(
                 self.object_detections,
                 label,
@@ -291,7 +323,14 @@ class MissionTaskNode(Node):
             f"Timed out waiting for {label} confidence >= {min_confidence:.2f}"
         )
 
-    def _run_short_hop_approach(self, goal_handle, label, phase, dynamic_cfg):
+    def _run_short_hop_approach(
+        self,
+        goal_handle,
+        label,
+        phase,
+        dynamic_cfg,
+        full_goal_builder=None,
+    ):
         hop_cfg = self._short_hop_config(label, dynamic_cfg)
         max_hops = int(hop_cfg.get("max_hops", 3))
         step_distance = float(hop_cfg.get("step_distance_m", 0.6))
@@ -315,7 +354,14 @@ class MissionTaskNode(Node):
             self._publish_phase(goal_handle, f"{phase}:hop_{hop_idx}")
             self._settle_before_detection(goal_handle, label, dynamic_cfg)
             detection = self._wait_for_detection(goal_handle, label, refresh_cfg)
-            full_goal_pose = self._build_dynamic_goal_pose(label, detection, dynamic_cfg)
+            if full_goal_builder is None:
+                full_goal_pose = self._build_dynamic_goal_pose(
+                    label,
+                    detection,
+                    dynamic_cfg,
+                )
+            else:
+                full_goal_pose = full_goal_builder()
             hop_goal_pose, is_final_goal = self._build_short_hop_goal_pose(
                 full_goal_pose,
                 step_distance,
@@ -513,12 +559,17 @@ class MissionTaskNode(Node):
         label,
         phase,
         target_depth=None,
+        lateral_tolerance=None,
         timeout_sec=None,
         allow_missing=False,
     ):
         servo_cfg = self.config.get("visual_servo", {})
         target_depth = float(target_depth or servo_cfg.get("target_depth_m", 0.45))
-        lateral_tol = float(servo_cfg.get("lateral_tolerance_m", 0.01))
+        lateral_tol = float(
+            lateral_tolerance
+            if lateral_tolerance is not None
+            else servo_cfg.get("lateral_tolerance_m", 0.01)
+        )
         depth_tol = float(servo_cfg.get("depth_tolerance_m", 0.08))
         timeout = float(timeout_sec or servo_cfg.get("timeout_sec", 30.0))
         command_period = float(servo_cfg.get("command_period_sec", 0.2))
@@ -540,6 +591,8 @@ class MissionTaskNode(Node):
         start = time.monotonic()
         saw_target = False
         bear_lateral_recovery_attempts = 0
+        previous_lateral = None
+        previous_action = None
 
         while time.monotonic() - start < timeout:
             self._check_cancel(goal_handle)
@@ -552,11 +605,17 @@ class MissionTaskNode(Node):
                 if label == "bear"
                 else None
             )
-            coords = (
-                detection["offset_flu"]
-                if detection is not None
-                else self.object_coordinates.get(label)
-            )
+            coords_source = "offset_flu"
+            if label == "bridge" and phase == "align_bridge_center":
+                detection = self._best_full_detection(label)
+                coords = self._bridge_mask_center_offset(detection)
+                coords_source = "mask_center_offset_flu"
+            else:
+                coords = (
+                    detection["offset_flu"]
+                    if detection is not None
+                    else self.object_coordinates.get(label)
+                )
             if coords and len(coords) == 3:
                 saw_target = True
                 depth, lateral, _height = coords
@@ -606,6 +665,18 @@ class MissionTaskNode(Node):
                         time.sleep(command_period)
                         continue
                 if abs(lateral) <= lateral_tol and depth <= target_depth + depth_tol:
+                    self._log_visual_servo_state(
+                        label,
+                        phase,
+                        depth,
+                        lateral,
+                        target_depth,
+                        lateral_tol,
+                        previous_lateral,
+                        previous_action,
+                        "STOP",
+                        coords_source,
+                    )
                     self._publish_control("STOP")
                     if aligned_settle > 0.0:
                         self.get_logger().info(
@@ -619,6 +690,20 @@ class MissionTaskNode(Node):
                     action = "CLOCKWISE_ROTATION_SLOW"
                 else:
                     action = "FORWARD_SLOW"
+                self._log_visual_servo_state(
+                    label,
+                    phase,
+                    depth,
+                    lateral,
+                    target_depth,
+                    lateral_tol,
+                    previous_lateral,
+                    previous_action,
+                    action,
+                    coords_source,
+                )
+                previous_lateral = lateral
+                previous_action = action
             else:
                 action = "COUNTERCLOCKWISE_ROTATION_SLOW"
             self._publish_control(action)
@@ -663,19 +748,23 @@ class MissionTaskNode(Node):
                 "bridge_pre_align_y_offset_m", 0.5
             )
         offset_m = float(offset_m)
-        allow_cached_tf = phase == "approach_bridge_tf_point" and offset_m == 0.0
+        dynamic_cfg = self.config.get("dynamic_approach", {})
+
+        if offset_m != 0.0 and self._use_short_hop_approach(label, dynamic_cfg):
+            self._run_short_hop_approach(
+                goal_handle,
+                label,
+                phase,
+                dynamic_cfg,
+                full_goal_builder=lambda: self._build_bridge_pre_align_goal_pose(
+                    self._require_full_bridge_detection(label),
+                    offset_m,
+                ),
+            )
+            return
 
         detection = self._best_full_detection(label)
         if detection is None:
-            if allow_cached_tf and self._last_bridge_tf_goal_pose is not None:
-                self.get_logger().warn(
-                    "Bridge detection missing for approach_bridge_tf_point; "
-                    "using last updated bridge TF pose"
-                )
-                goal_pose = self._fresh_pose_stamped(self._last_bridge_tf_goal_pose)
-                self._publish_goal_pose(goal_pose)
-                self._send_nav_goal(goal_handle, "Manual_Nav")
-                return
             raise RuntimeError(f"missing full {label} detection")
 
         goal_pose = self._build_bridge_pre_align_goal_pose(
@@ -685,6 +774,17 @@ class MissionTaskNode(Node):
         self._publish_goal_pose(goal_pose)
         self._send_nav_goal(goal_handle, "Manual_Nav")
 
+    def _require_full_bridge_detection(self, label):
+        detection = self._best_full_detection(label)
+        if detection is None:
+            raise RuntimeError(f"missing full {label} detection")
+        touching_edges = self._mask_touching_edges(detection)
+        if touching_edges:
+            raise RuntimeError(
+                f"{label} mask still reaches camera edge: {touching_edges}"
+            )
+        return detection
+
     def _build_bridge_pre_align_goal_pose(
         self,
         detection,
@@ -692,34 +792,30 @@ class MissionTaskNode(Node):
     ):
         bridge_offset = self._bridge_detection_offset(detection)
         if bridge_offset is None:
-            raise RuntimeError("bridge detection missing ground-contact offset")
+            raise RuntimeError("bridge detection missing bridge TF origin offset")
 
         pose = self.latest_amcl_pose.pose.pose
         robot_yaw = yaw_from_quaternion(pose.orientation)
         bridge_tf_yaw = self._snapped_bridge_world_yaw(detection, robot_yaw)
+        self._last_bridge_tf_yaw = bridge_tf_yaw
         bridge_x, bridge_y = self._offset_flu_to_map_xy(
             pose.position.x,
             pose.position.y,
             robot_yaw,
             bridge_offset,
         )
-        heading_x = -math.sin(bridge_tf_yaw)
-        heading_y = math.cos(bridge_tf_yaw)
-        goal_yaw = normalize_angle(bridge_tf_yaw)
-        axis_name = "x" if abs(normalize_angle(bridge_tf_yaw)) < 1e-3 else "y"
-        frame_id = self.latest_amcl_pose.header.frame_id or "map"
-        self._last_bridge_tf_goal_pose = self._make_pose_stamped(
-            bridge_x,
-            bridge_y,
-            goal_yaw,
-            frame_id,
+        offset_x, offset_y, goal_yaw = self._bridge_pre_align_offset_and_yaw(
+            bridge_tf_yaw,
+            offset_m,
         )
-        goal_x = bridge_x + heading_x * offset_m
-        goal_y = bridge_y + heading_y * offset_m
+        axis_name = "x" if self._is_bridge_yaw_180(bridge_tf_yaw) else "y"
+        frame_id = self.latest_amcl_pose.header.frame_id or "map"
+        goal_x = bridge_x + offset_x
+        goal_y = bridge_y + offset_y
         self.get_logger().info(
             "Bridge pre-align determined: "
             f"bridge_offset_flu={bridge_offset} "
-            f"bridge_y_axis_map=({heading_x:.3f}, {heading_y:.3f}) "
+            f"pre_align_offset_map=({offset_x:.3f}, {offset_y:.3f}) "
             f"snapped_world_axis={axis_name} "
             f"snapped_world_yaw={bridge_tf_yaw:.3f} "
             f"bridge_tf_waypoint_offset={offset_m:.3f} "
@@ -728,6 +824,16 @@ class MissionTaskNode(Node):
         )
 
         return self._make_pose_stamped(goal_x, goal_y, goal_yaw, frame_id)
+
+    @staticmethod
+    def _bridge_pre_align_offset_and_yaw(bridge_tf_yaw, offset_m):
+        if MissionTaskNode._is_bridge_yaw_180(bridge_tf_yaw):
+            return 0.0, -offset_m, math.pi / 2.0
+        return -offset_m, 0.0, -math.pi / 2.0
+
+    @staticmethod
+    def _is_bridge_yaw_180(bridge_tf_yaw):
+        return abs(abs(bridge_tf_yaw) - math.pi) < 1e-3
 
     def _make_pose_stamped(self, x, y, yaw, frame_id):
         msg = PoseStamped()
@@ -739,32 +845,22 @@ class MissionTaskNode(Node):
         msg.pose.orientation = self._quaternion_from_yaw(yaw)
         return msg
 
-    def _fresh_pose_stamped(self, pose):
-        msg = PoseStamped()
-        msg.header.stamp = self.get_clock().now().to_msg()
-        msg.header.frame_id = pose.header.frame_id
-        msg.pose.position.x = pose.pose.position.x
-        msg.pose.position.y = pose.pose.position.y
-        msg.pose.position.z = pose.pose.position.z
-        msg.pose.orientation = pose.pose.orientation
-        return msg
-
     @staticmethod
     def _snapped_bridge_world_yaw(detection, robot_yaw):
         bridge_model = detection.get("bridge_model")
         if not isinstance(bridge_model, dict):
-            return 0.0
+            return math.pi
 
         corners = bridge_model.get("ground_edge_corners_flu")
         if not isinstance(corners, list) or len(corners) != 2:
-            return 0.0
+            return math.pi
         try:
             start = [float(value) for value in corners[0]]
             end = [float(value) for value in corners[1]]
         except (TypeError, ValueError):
-            return 0.0
+            return math.pi
         if len(start) != 3 or len(end) != 3:
-            return 0.0
+            return math.pi
 
         edge_flu = [
             end[0] - start[0],
@@ -773,13 +869,16 @@ class MissionTaskNode(Node):
         ]
         edge_x, edge_y = MissionTaskNode._vector_flu_to_map_xy(robot_yaw, edge_flu)
         if abs(edge_x) < 1e-6 and abs(edge_y) < 1e-6:
-            return 0.0
-        return 0.0 if abs(edge_x) >= abs(edge_y) else math.pi / 2.0
+            return math.pi
+        return math.pi if abs(edge_x) >= abs(edge_y) else math.pi / 2.0
 
     @staticmethod
     def _bridge_detection_offset(detection):
         bridge_model = detection.get("bridge_model")
         if isinstance(bridge_model, dict):
+            offset = bridge_model.get("bridge_tf_origin_flu")
+            if isinstance(offset, list) and len(offset) == 3:
+                return [float(value) for value in offset]
             offset = bridge_model.get("ground_contact_offset_flu")
             if isinstance(offset, list) and len(offset) == 3:
                 return [float(value) for value in offset]
@@ -815,7 +914,18 @@ class MissionTaskNode(Node):
             time.sleep(0.1)
         self._publish_control("STOP")
 
-    def _best_full_detection(self, label):
+    def _conditional_bridge_yaw_turn(self, goal_handle, phase, action, config_key):
+        self._publish_phase(goal_handle, phase)
+        if self._last_bridge_tf_yaw is None:
+            self.get_logger().warn("No bridge yaw cached; skipping conditional turn")
+            return
+        if not self._is_bridge_yaw_180(self._last_bridge_tf_yaw):
+            self.get_logger().info("Bridge yaw is 90 deg; skipping CCW pre-center turn")
+            return
+        self.get_logger().info("Bridge yaw is 180 deg; turning CCW before center align")
+        self._timed_drive(goal_handle, phase, action, config_key)
+
+    def _best_full_detection(self, label, min_confidence=0.0):
         best = None
         for detection in self.object_detections or []:
             if not isinstance(detection, dict) or detection.get("label") != label:
@@ -828,7 +938,7 @@ class MissionTaskNode(Node):
                 depth = float(offset[0])
             except (TypeError, ValueError):
                 continue
-            if depth <= 0.0:
+            if depth <= 0.0 or confidence < min_confidence:
                 continue
             if best is None:
                 best = detection
@@ -840,6 +950,66 @@ class MissionTaskNode(Node):
             ):
                 best = detection
         return best
+
+    @staticmethod
+    def _bridge_mask_center_offset(detection):
+        if not isinstance(detection, dict):
+            return None
+        offset = detection.get("mask_center_offset_flu")
+        if not isinstance(offset, list) or len(offset) != 3:
+            return None
+        try:
+            return [float(value) for value in offset]
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _mask_touching_edges(detection):
+        edges = detection.get("mask_touching_edges")
+        if isinstance(edges, list):
+            return [str(edge) for edge in edges if edge]
+
+        bounds = detection.get("mask_bounds_px")
+        size = detection.get("mask_image_size_px")
+        if not (
+            isinstance(bounds, list)
+            and len(bounds) == 4
+            and isinstance(size, list)
+            and len(size) == 2
+        ):
+            return []
+
+        min_x, min_y, max_x, max_y = [float(value) for value in bounds]
+        width, height = [float(value) for value in size]
+        touching = []
+        if min_x <= 0.0:
+            touching.append("left")
+        if max_x >= width - 1.0:
+            touching.append("right")
+        if min_y <= 0.0:
+            touching.append("top")
+        if max_y >= height - 1.0:
+            touching.append("bottom")
+        return touching
+
+    @staticmethod
+    def _bridge_edge_recovery_action(detection, touching_edges):
+        if "left" in touching_edges:
+            return "COUNTERCLOCKWISE_ROTATION_SLOW"
+        if "right" in touching_edges:
+            return "CLOCKWISE_ROTATION_SLOW"
+
+        offset = detection.get("mask_center_offset_flu") or detection.get("offset_flu")
+        if isinstance(offset, list) and len(offset) >= 2:
+            try:
+                lateral = float(offset[1])
+            except (TypeError, ValueError):
+                lateral = 0.0
+            if lateral > 0.0:
+                return "COUNTERCLOCKWISE_ROTATION_SLOW"
+            if lateral < 0.0:
+                return "CLOCKWISE_ROTATION_SLOW"
+        return "COUNTERCLOCKWISE_ROTATION_SLOW"
 
     def _send_nav_goal(self, goal_handle, mode):
         goal = NavGoal.Goal()
@@ -914,6 +1084,59 @@ class MissionTaskNode(Node):
             f"control_signal_subs={self.control_signal_pub.get_subscription_count()} "
             f"front_publishers={self.count_publishers('car_C_front_wheel')} "
             f"rear_publishers={self.count_publishers('car_C_rear_wheel')}"
+        )
+
+    def _log_visual_servo_state(
+        self,
+        label,
+        phase,
+        depth,
+        lateral,
+        target_depth,
+        lateral_tol,
+        previous_lateral,
+        previous_action,
+        action,
+        coords_source="offset_flu",
+    ):
+        if phase != "align_bridge_center":
+            return
+
+        trend = "first_sample"
+        delta_abs = 0.0
+        if previous_lateral is not None:
+            delta_abs = abs(lateral) - abs(previous_lateral)
+            if delta_abs < -1e-4:
+                trend = "decreasing"
+            elif delta_abs > 1e-4:
+                trend = "increasing"
+            else:
+                trend = "unchanged"
+        previous_lateral_text = (
+            f"{previous_lateral:.3f}m"
+            if previous_lateral is not None
+            else "none"
+        )
+
+        self.get_logger().info(
+            "Visual servo diagnostic "
+            f"phase={phase} label={label} depth={depth:.3f}m "
+            f"target_depth={target_depth:.3f}m lateral={lateral:.3f}m "
+            f"abs_lateral={abs(lateral):.3f}m lateral_tol={lateral_tol:.3f}m "
+            f"coords_source={coords_source} "
+            f"prev_lateral={previous_lateral_text}"
+            f" prev_action={previous_action or 'none'} next_action={action} "
+            f"delta_abs_lateral={delta_abs:+.3f}m trend={trend}"
+        )
+
+    def _log_bridge_edge_recovery(self, touching_edges, action):
+        now = time.monotonic()
+        if now - self._last_bridge_edge_log_time < 1.0:
+            return
+        self._last_bridge_edge_log_time = now
+        self.get_logger().info(
+            "Bridge mask reaches camera edge "
+            f"{touching_edges}; rotating with {action}"
         )
 
     def _object_offset_callback(self, msg):

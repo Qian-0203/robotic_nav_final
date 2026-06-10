@@ -50,7 +50,20 @@ class SegmentationGeometryTest(unittest.TestCase):
         self.assertEqual(result["box"], [4, 4, 5, 5])
         self.assertEqual(result["mask_center_px"], [4.5, 4.5])
         self.assertEqual(result["mask_area_px"], 4)
+        self.assertEqual(result["mask_bounds_px"], [4, 4, 5, 5])
+        self.assertEqual(result["mask_image_size_px"], [10, 10])
+        self.assertEqual(result["mask_touching_edges"], [])
         self.assertIn("mask_angle_rad", result)
+
+    def test_compute_mask_geometry_reports_touching_edges(self):
+        mask = np.zeros((10, 12), dtype=bool)
+        mask[2:5, 0:3] = True
+
+        geometry = compute_mask_geometry(mask)
+
+        self.assertEqual(geometry["mask_bounds_px"], [0, 2, 2, 4])
+        self.assertEqual(geometry["mask_image_size_px"], [12, 10])
+        self.assertEqual(geometry["mask_touching_edges"], ["left"])
 
     def test_bridge_offset_uses_ground_contact_center(self):
         mask = np.zeros((20, 30), dtype=bool)

@@ -3,7 +3,7 @@ from rclpy.qos import QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
 from sensor_msgs.msg import CompressedImage, Imu, Image
 from std_msgs.msg import String, Bool
 from geometry_msgs.msg import PointStamped
-from tf2_ros import TransformBroadcaster
+from tf2_ros import Buffer, TransformBroadcaster, TransformListener
 from visualization_msgs.msg import MarkerArray
 
 
@@ -92,6 +92,8 @@ class RosCommunicator(Node):
                 pub["msg_type"], pub["topic"], 10
             )
         self.tf_broadcaster = TransformBroadcaster(self)
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener(self.tf_buffer, self)
 
     # --- Callback Functions ---
     def _image_sub_callback(self, msg):
@@ -129,3 +131,6 @@ class RosCommunicator(Node):
             self.tf_broadcaster.sendTransform(transform)
         except Exception as e:
             self.get_logger().error(f"Could not publish transform: {e}")
+
+    def lookup_transform(self, target_frame, source_frame, time):
+        return self.tf_buffer.lookup_transform(target_frame, source_frame, time)

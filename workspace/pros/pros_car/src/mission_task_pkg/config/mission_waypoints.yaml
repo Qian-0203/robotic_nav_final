@@ -65,6 +65,7 @@ dynamic_approach:
   detection_timeout_sec: 45.0
   amcl_settle_before_detection_sec:
     default: 3.0
+    bridge: 1.0
   fallback_to_waypoint: true
   min_confidence:
     default: 0.0
@@ -77,13 +78,16 @@ dynamic_approach:
   short_hop:
     default:
       enabled: false
-      max_hops: 5
+      max_hops: 8
       step_distance_m: 1.5
       goal_tolerance_m: 0.1
       detection_refresh_timeout_sec: 20.0
     bear:
       enabled: true
       detection_refresh_timeout_sec: 5.0
+    bridge:
+      enabled: true
+      detection_refresh_timeout_sec: 10.0
 
 visual_servo:
   target_depth_m: 0.39
@@ -100,9 +104,10 @@ visual_servo:
   bear_lateral_recovery_max_attempts: 5
   bear_candidate_min_confidence: 0.9
   bridge_cross_sec: 4.0
-  bridge_climb_sec: 3.0
+  bridge_climb_sec: 5.0
   bridge_descend_sec: 3.0
   bridge_pre_align_y_offset_m: 0.6
+  bridge_yaw_180_turn_sec: 5.0
   door_enter_sec: 2.0
   bridge_mask:
     angle_tolerance_rad: 0.12

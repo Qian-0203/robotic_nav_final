@@ -59,13 +59,19 @@ class BehaviorTreeRunnerTest(unittest.TestCase):
         self.assertLess(types.index("WaitDetection"), types.index("ApproachBridgePreAlign"))
         self.assertLess(
             phases.index("approach_bridge_y_offset"),
-            phases.index("approach_bridge_tf_point"),
+            phases.index("bridge_yaw_180_ccw_turn"),
         )
         self.assertLess(
-            phases.index("approach_bridge_tf_point"),
+            phases.index("bridge_yaw_180_ccw_turn"),
             phases.index("align_bridge_center"),
         )
         self.assertLess(types.index("VisualServo"), types.index("ArmGoal"))
+        bridge_center_servo = next(
+            child
+            for child in trees["task2_bridge"]["children"]
+            if child.get("phase") == "align_bridge_center"
+        )
+        self.assertEqual(bridge_center_servo["lateral_tolerance_m"], 0.05)
 
     def test_task3_tree_uses_fixed_waypoints_before_knob_servo(self):
         trees = _load_mission_trees()

@@ -9,6 +9,21 @@ def compute_mask_geometry(mask):
     if area == 0:
         return None
 
+    height, width = mask.shape[:2]
+    min_y = int(points_yx[:, 0].min())
+    max_y = int(points_yx[:, 0].max())
+    min_x = int(points_yx[:, 1].min())
+    max_x = int(points_yx[:, 1].max())
+    touching_edges = []
+    if min_x <= 0:
+        touching_edges.append("left")
+    if max_x >= width - 1:
+        touching_edges.append("right")
+    if min_y <= 0:
+        touching_edges.append("top")
+    if max_y >= height - 1:
+        touching_edges.append("bottom")
+
     center_y, center_x = points_yx.mean(axis=0)
     angle = 0.0
     if area >= 2:
@@ -27,6 +42,9 @@ def compute_mask_geometry(mask):
         "mask_center_px": [round(float(center_x), 3), round(float(center_y), 3)],
         "mask_area_px": area,
         "mask_angle_rad": round(float(angle), 3),
+        "mask_bounds_px": [min_x, min_y, max_x, max_y],
+        "mask_image_size_px": [int(width), int(height)],
+        "mask_touching_edges": touching_edges,
     }
 
 
