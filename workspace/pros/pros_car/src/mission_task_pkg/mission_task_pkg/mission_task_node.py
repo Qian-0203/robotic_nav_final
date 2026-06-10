@@ -213,14 +213,7 @@ class MissionTaskNode(Node):
                 goal_handle,
                 node["label"],
                 node.get("phase", f"align_{node['label']}"),
-                target_depth=node.get("target_depth", node.get("target_depth_m")),
-                lateral_tolerance=node.get("lateral_tolerance_m"),
-                timeout_sec=node.get("timeout_sec"),
-                allow_missing=bool(node.get("allow_missing", False)),
-                bear_candidate_min_confidence=node.get(
-                    "bear_candidate_min_confidence"
-                ),
-                control_speed=node.get("control_speed", "slow"),
+                node,
             )
             return
         if node_type == "ApproachBridgePreAlign":
@@ -237,6 +230,12 @@ class MissionTaskNode(Node):
                 node.get("phase", "bridge_yaw_180_ccw_turn"),
                 node.get("action", "COUNTERCLOCKWISE_ROTATION_SLOW"),
                 node.get("config_key", "bridge_yaw_180_turn_sec"),
+                node.get("phase_90", "bridge_yaw_90_cw_turn"),
+                node.get("action_90", "CLOCKWISE_ROTATION_SLOW"),
+                node.get(
+                    "config_key_90",
+                    node.get("config_key", "bridge_yaw_180_turn_sec"),
+                ),
             )
             return
         if node_type == "TimedDrive":
@@ -414,10 +413,15 @@ class MissionTaskNode(Node):
         self.get_logger().info(
             f"Waiting {settle_sec:.1f}s before detecting {label}"
         )
+        settle_action = (
+            "COUNTERCLOCKWISE_ROTATION_SLOW" if label == "bridge" else "STOP"
+        )
         start = time.monotonic()
         while time.monotonic() - start < settle_sec:
             self._check_cancel(goal_handle)
+            self._publish_control(settle_action)
             time.sleep(0.1)
+        self._publish_control("STOP")
 
     def _build_dynamic_goal_pose(self, label, detection, dynamic_cfg):
         if self.latest_amcl_pose is None:
@@ -573,45 +577,36 @@ class MissionTaskNode(Node):
         self._publish_repeated(self.target_label_pub, msg)
         self.get_logger().info(f"Set YOLO target label: {label}")
 
-    def _visual_servo(
-        self,
-        goal_handle,
-        label,
-        phase,
-        target_depth=None,
-        lateral_tolerance=None,
-        timeout_sec=None,
-        allow_missing=False,
-        bear_candidate_min_confidence=None,
-        control_speed="slow",
-    ):
-        servo_cfg = self.config.get("visual_servo", {})
+    def _visual_servo(self, goal_handle, label, phase, servo_overrides=None):
+        default_servo_cfg = self.config.get("visual_servo", {})
+        servo_cfg = self._visual_servo_config(servo_overrides)
+
+        control_speed = servo_cfg.get("control_speed", "slow")
         control_profile = self._visual_servo_control_profile(control_speed)
-        target_depth = float(target_depth or servo_cfg.get("target_depth_m", 0.45))
-        lateral_tol = float(
-            lateral_tolerance
-            if lateral_tolerance is not None
-            else servo_cfg.get("lateral_tolerance_m", 0.01)
-        )
+        allow_missing = bool(servo_cfg.get("allow_missing", False))
+
+        default_target_depth = float(default_servo_cfg.get("target_depth_m", 0.45))
+        target_depth = float(servo_cfg.get("target_depth_m", default_target_depth))
+        lateral_tol = float(servo_cfg.get("lateral_tolerance_m", 0.01))
         depth_tol = float(servo_cfg.get("depth_tolerance_m", 0.08))
-        timeout = float(timeout_sec or servo_cfg.get("timeout_sec", 30.0))
+        timeout = float(servo_cfg.get("timeout_sec", 30.0))
         command_period = float(servo_cfg.get("command_period_sec", 0.2))
-        rotation_settle = float(servo_cfg.get("rotation_settle_sec", command_period))
+        rotation_settle = float(
+            servo_cfg.get("rotation_settle_sec", command_period)
+        )
         aligned_settle = float(servo_cfg.get("aligned_settle_sec", 3.0))
-        bear_recovery_depth = float(servo_cfg.get("bear_recovery_depth_m", 1.5))
+        bear_recovery_depth = max(
+            float(servo_cfg.get("bear_recovery_depth_m", 1.5)),
+            target_depth,
+        )
         bear_lateral_recovery_sec = float(
             servo_cfg.get("bear_lateral_recovery_backward_sec", 1.0)
         )
         bear_lateral_recovery_max_attempts = int(
-            servo_cfg.get(
-                "bear_lateral_recovery_max_attempts",
-                servo_cfg.get("bear_recovery_max_attempts", 5),
-            )
+            servo_cfg.get("bear_lateral_recovery_max_attempts", 5)
         )
         bear_min_confidence = float(
-            bear_candidate_min_confidence
-            if bear_candidate_min_confidence is not None
-            else servo_cfg.get("bear_candidate_min_confidence", 0.0)
+            servo_cfg.get("bear_candidate_min_confidence", 0.0)
         )
 
         self._publish_phase(goal_handle, phase)
@@ -658,7 +653,10 @@ class MissionTaskNode(Node):
                         f"lateral={lateral:.3f} m, "
                         f"confidence={confidence_text}"
                     )
-                    if bear_recovery_depth > 0.0 and depth > bear_recovery_depth:
+                    if (
+                        bear_recovery_depth > 0.0
+                        and depth > bear_recovery_depth
+                    ):
                         self._publish_control("STOP")
                         raise VisualServoRecoveryNeeded(
                             label,
@@ -666,7 +664,7 @@ class MissionTaskNode(Node):
                             bear_recovery_depth,
                         )
                     if (
-                        depth <= target_depth + depth_tol
+                        depth <= default_target_depth + depth_tol
                         and abs(lateral) > lateral_tol
                         and bear_lateral_recovery_sec > 0.0
                         and bear_lateral_recovery_attempts
@@ -747,6 +745,11 @@ class MissionTaskNode(Node):
             self.get_logger().warn(f"{label} was not detected; continuing by waypoint")
             return
         raise RuntimeError(f"Timed out while servoing to {label}")
+
+    def _visual_servo_config(self, overrides=None):
+        cfg = dict(self.config.get("visual_servo", {}))
+        cfg.update(overrides or {})
+        return cfg
 
     def _visual_servo_control_profile(self, control_speed):
         try:
@@ -951,15 +954,28 @@ class MissionTaskNode(Node):
             time.sleep(0.1)
         self._publish_control("STOP")
 
-    def _conditional_bridge_yaw_turn(self, goal_handle, phase, action, config_key):
-        self._publish_phase(goal_handle, phase)
+    def _conditional_bridge_yaw_turn(
+        self,
+        goal_handle,
+        phase,
+        action,
+        config_key,
+        phase_90,
+        action_90,
+        config_key_90,
+    ):
         if self._last_bridge_tf_yaw is None:
             self.get_logger().warn("No bridge yaw cached; skipping conditional turn")
             return
         if not self._is_bridge_yaw_180(self._last_bridge_tf_yaw):
-            self.get_logger().info("Bridge yaw is 90 deg; skipping CCW pre-center turn")
+            self.get_logger().info(
+                "Bridge yaw is 90 deg; turning CW before center align"
+            )
+            self._timed_drive(goal_handle, phase_90, action_90, config_key_90)
             return
-        self.get_logger().info("Bridge yaw is 180 deg; turning CCW before center align")
+        self.get_logger().info(
+            "Bridge yaw is 180 deg; turning CCW before center align"
+        )
         self._timed_drive(goal_handle, phase, action, config_key)
 
     def _best_full_detection(self, label, min_confidence=0.0):

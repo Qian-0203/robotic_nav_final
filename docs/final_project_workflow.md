@@ -103,14 +103,21 @@ small reusable primitives.
 1. Publish the configured initial pose.
 2. Set YOLO target label to `bridge`.
 3. Wait for bridge detection.
-4. Visual-servo to the bridge center.
-5. Align bridge orientation from the segmentation mask angle.
-6. Drive forward for `bridge_climb_sec`.
+4. Navigate to the bridge pre-align pose using the bridge TF origin offset.
+5. If the bridge yaw is detected as 180 degrees, rotate counterclockwise for
+   `bridge_yaw_180_turn_sec`.
+6. Visual-servo to the bridge center using the overrides in
+   `config/mission_trees.yaml`.
 7. Set YOLO target label to `bear`.
-8. Pick up the bear on top of the bridge.
-9. Drive backward for `bridge_descend_sec`.
-10. Navigate back to waypoint `start`.
-11. Run arm mode `place_bear`.
+8. Wait for the bear before climbing.
+9. Visual-servo the bear to the image center before climbing using the
+   overrides in `config/mission_trees.yaml`, so practical completion can be
+   tuned from YAML rather than code.
+10. Drive forward for `bridge_climb_sec`.
+11. Run arm mode `pickup_bear`.
+12. Drive forward for `bridge_descend_sec`.
+13. Navigate back to waypoint `start`.
+14. Run arm mode `place_bear`.
 
 `task3_knob`:
 
@@ -135,23 +142,18 @@ For an `ApproachDetectedTarget` step, the mission node uses this flow:
 6. Send `Manual_Nav` to `nav_action_server`.
 7. If dynamic approach fails, use the configured fallback waypoint or search.
 
-The configured stand-off distances are:
-
-| Target | Stand-off |
-| --- | --- |
-| `bear` | `0.40 m` |
-| `knob` | `0.50 m` |
-| `bridge` | `1.00 m` |
+The configured stand-off distances live in `config/mission_waypoints.yaml`
+under `dynamic_approach.standoff_m`.
 
 For `bear`, short-hop approach is enabled. Instead of sending one long dynamic
 goal, the mission can navigate in smaller steps and refresh the detection
-between hops. If no bear detection with confidence at least `0.85` is found
-within `5s`, the mission stops rotation and falls back to waypoint
-`bear_approach` at `(0.25, 0.25)`.
+between hops. If no bear detection matching the configured confidence and
+refresh timeout is found, the mission stops rotation and falls back to the
+configured `bear_approach` waypoint.
 
 ## Visual Servo
 
-Visual servo is the final alignment stage after navigation. It publishes
+Visual servo is the fine alignment stage after navigation or detection. It publishes
 direct wheel speeds to:
 
 - `car_C_front_wheel`
@@ -160,20 +162,10 @@ direct wheel speeds to:
 If the bear is still not detected during this stage, the chassis rotates
 counterclockwise while looking for it.
 
-Current tuning:
-
-| Setting | Value |
-| --- | --- |
-| Forward command | `100` |
-| Rotation command | `230` |
-| Target depth | `0.39 m` |
-| Lateral tolerance | `0.03 m` |
-| Depth tolerance | `0.01 m` |
-| Command period | `0.20 s` |
-| Rotation settle time | `0.35 s` |
-| Aligned settle time | `2.0 s` |
-| Bear lateral recovery backward time | `1.0 s` |
-| Bear lateral recovery max attempts | `5` |
+Current tuning lives in `config/mission_waypoints.yaml` under `visual_servo`.
+Per-step VisualServo overrides live in `config/mission_trees.yaml`, so target
+depth, lateral/depth tolerances, timing, bear confidence, recovery, timeout, and
+speed profile can be adjusted from YAML.
 
 The servo logic is simple:
 

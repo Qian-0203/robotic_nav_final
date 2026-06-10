@@ -36,31 +36,37 @@ task2_bridge:
       phase: bridge_yaw_180_ccw_turn
       action: COUNTERCLOCKWISE_ROTATION
       config_key: bridge_yaw_180_turn_sec
+      phase_90: bridge_yaw_90_cw_turn
+      action_90: CLOCKWISE_ROTATION
+      config_key_90: bridge_yaw_180_turn_sec
     - type: VisualServo
       label: bridge
       phase: align_bridge_center
       lateral_tolerance_m: 0.02
       target_depth_m: 1.5
-    - type: TimedDrive
-      phase: climb_bridge
-      action: FORWARD
-      config_key: bridge_climb_sec
     - type: SetTargetLabel
       label: bear
     - type: WaitDetection
       label: bear
-      phase: wait_bear_on_bridge_top
+      phase: wait_bear_before_climb
     - type: VisualServo
       label: bear
-      phase: align_bear_for_pickup
+      phase: align_bear_center_before_climb
+      target_depth_m: 100.0
       bear_candidate_min_confidence: 0.4
-      control_speed: fast
+      control_speed: slow
+    - type: TimedDrive
+      phase: climb_bridge
+      action: FORWARD
+      config_key: bridge_climb_sec
     - type: ArmGoal
       mode: pickup_bear
     - type: TimedDrive
       phase: descend_bridge
       action: FORWARD
       config_key: bridge_descend_sec
+    - type: NavigateWaypoint
+      waypoint: bridge_return_midpoint
     - type: ReturnToStart
     - type: ArmGoal
       mode: place_bear

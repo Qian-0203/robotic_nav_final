@@ -125,8 +125,8 @@ flowchart TD
     DynamicGoal[Estimate target pose and publish stand-off /goal_pose]
     SendNav[Send NavGoal: Manual_Nav]
     Fallback[Fallback to configured waypoint/search]
-    Servo[Slow visual servo fine alignment]
-    BridgeAlign[Align bridge mask orientation]
+    Servo[Visual servo fine alignment]
+    BridgePreAlign[Bridge pre-align/yaw turn]
     ArmGoal[Send ArmGoal mode]
     TimedDrive[Timed wheel command]
     ReturnStart[Return to configured start]
@@ -143,7 +143,7 @@ flowchart TD
     Primitive --> DynamicGoal
     Primitive --> SendNav
     Primitive --> Servo
-    Primitive --> BridgeAlign
+    Primitive --> BridgePreAlign
     Primitive --> TimedDrive
     Primitive --> ArmGoal
     Primitive --> ReturnStart
@@ -159,7 +159,7 @@ flowchart TD
     SetLabel --> Primitive
     SendNav --> Primitive
     Servo --> Primitive
-    BridgeAlign --> Primitive
+    BridgePreAlign --> Primitive
     TimedDrive --> Primitive
     ArmGoal --> Primitive
     ReturnStart --> Primitive
@@ -172,7 +172,7 @@ flowchart TD
 Current mission tasks:
 
 - `task1_bear`: prepare the start pose, retry bear dynamic approach plus visual servo alignment, `pickup_bear`, return to `start`, then `place_bear`.
-- `task2_bridge`: prepare the start pose, target `bridge`, wait for bridge segmentation, visual-servo bridge center, align mask orientation, climb forward, target `bear`, pick it up on the bridge, drive backward down, return to `start`, then `place_bear`.
+- `task2_bridge`: prepare the start pose, target `bridge`, wait for bridge segmentation, navigate to the bridge pre-align pose, conditionally yaw-turn for a 180-degree bridge, visual-servo bridge center, target `bear`, visual-servo the bear to center before climbing using YAML overrides, climb forward, run `pickup_bear`, drive forward down, return to `start`, then `place_bear`.
 - `task3_knob`: prepare the start pose, navigate through `knob_stage_1` and `knob_stage_2`, target `knob`, visual-servo for grasp, run `grasp_knob`, then timed-drive forward through the door.
 
 ## Architecture Review
