@@ -95,8 +95,16 @@ class BehaviorTreeRunnerTest(unittest.TestCase):
         self.assertEqual(children[1]["waypoint"], "knob_stage_1")
         self.assertEqual(children[2]["type"], "NavigateWaypoint")
         self.assertEqual(children[2]["waypoint"], "knob_stage_2")
-        self.assertEqual(children[4]["type"], "VisualServo")
-        self.assertEqual(children[5]["mode"], "grasp_knob")
+        self.assertEqual(children[3]["type"], "NavigateWaypoint")
+        self.assertEqual(children[3]["waypoint"], "knob_stage_3")
+        self.assertEqual(children[5]["type"], "VisualServo")
+        self.assertEqual(children[5]["phase"], "align_knob_for_grasp")
+        self.assertEqual(children[5]["target_depth_m"], 0.35)
+        self.assertLess(
+            _first_child_index(children, "VisualServo"),
+            _first_child_index(children, "ArmGoal"),
+        )
+        self.assertEqual(children[6]["mode"], "grasp_knob")
 
     def test_task1_bear_fallback_and_detection_timeout(self):
         config = _load_mission_waypoints()
@@ -145,6 +153,12 @@ def _load_mission_waypoints():
 def _walk_tree_nodes(trees):
     for root in trees.values():
         yield from _walk_node(root)
+
+
+def _first_child_index(children, child_type):
+    return next(
+        index for index, child in enumerate(children) if child.get("type") == child_type
+    )
 
 
 def _walk_node(node):

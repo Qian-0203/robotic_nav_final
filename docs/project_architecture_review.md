@@ -173,7 +173,7 @@ Current mission tasks:
 
 - `task1_bear`: prepare the start pose, retry bear dynamic approach plus visual servo alignment, `pickup_bear`, return to `start`, then `place_bear`.
 - `task2_bridge`: prepare the start pose, target `bridge`, wait for bridge segmentation, navigate to the bridge pre-align pose, conditionally yaw-turn for a 180-degree bridge, visual-servo bridge center, target `bear`, visual-servo the bear to center before climbing using YAML overrides, climb forward, run `pickup_bear`, drive forward down, return to `start`, then `place_bear`.
-- `task3_knob`: prepare the start pose, navigate through `knob_stage_1` and `knob_stage_2`, target `knob`, visual-servo for grasp, run `grasp_knob`, then timed-drive forward through the door.
+- `task3_knob`: prepare the start pose, navigate through `knob_stage_1`, `knob_stage_2`, and `knob_stage_3`, target `knob`, visual-servo for grasp with a YAML depth override, run the `grasp_knob` arm unlock sequence, then timed-drive forward through the door with the fast `FORWARD` profile.
 
 ## Architecture Review
 

@@ -40,3 +40,31 @@ cd workspace/pros/ros2_yolo_integration
 ```
 
 Detailed workflow notes are in `docs/final_project_workflow.md`.
+
+## Mission Tasks
+
+The mission server supports:
+
+- `task1_bear`: navigate to the bear, align, pick it up, return, and place it.
+- `task2_bridge`: align to the bridge, cross it, pick up the bear, return, and
+  place it.
+- `task3_knob`: navigate through `knob_stage_1`, `knob_stage_2`, and
+  `knob_stage_3`, align to the knob, run the arm
+  `knob_pre_grasp -> knob_grasp -> knob_unlock` flow, then drive forward
+  through the doorway.
+
+Run Task 3 from the `pros_car` container after sourcing the workspace:
+
+```bash
+ros2 run mission_task_pkg mission_task_client task3_knob
+```
+
+Task 3 tuning is YAML-driven:
+
+- Waypoints and `door_enter_sec` live in
+  `workspace/pros/pros_car/src/mission_task_pkg/config/mission_waypoints.yaml`.
+- The knob visual-servo depth override and fast forward `enter_after_knob`
+  action live in
+  `workspace/pros/pros_car/src/mission_task_pkg/config/mission_trees.yaml`.
+- Arm poses live in
+  `workspace/pros/pros_car/src/arm_control_pkg/config/arm_config.yaml`.

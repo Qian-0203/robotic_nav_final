@@ -124,10 +124,24 @@ small reusable primitives.
 1. Publish the configured initial pose.
 2. Navigate to `knob_stage_1`.
 3. Navigate to `knob_stage_2`.
-4. Set YOLO target label to `knob`.
-5. Visual-servo until the knob is aligned for grasp.
-6. Run arm mode `grasp_knob`.
-7. Drive forward for `door_enter_sec`.
+4. Navigate to `knob_stage_3`.
+5. Set YOLO target label to `knob`.
+6. Visual-servo until the knob is aligned for grasp using the per-step
+   `target_depth_m` override in `config/mission_trees.yaml`.
+7. Run arm mode `grasp_knob`, which sends
+   `knob_pre_grasp -> knob_grasp`, closes the gripper, moves down by the
+   configured step count, then sends `knob_unlock`.
+8. Drive forward with the fast `FORWARD` profile for `door_enter_sec`.
+
+Current Task 3 knob tuning:
+
+| Setting | Value |
+| --- | --- |
+| `knob_stage_1` | `x: 3.0`, `y: 0.0`, `yaw: 0.0`, `frame_id: map` |
+| `knob_stage_2` | `x: 3.0`, `y: 2`, `yaw: 0.0`, `frame_id: map` |
+| `knob_stage_3` | `x: 3.5`, `y: 1.5`, `yaw: 0.0`, `frame_id: map` |
+| knob visual-servo depth | `0.35 m` |
+| door entry drive | `FORWARD` for `20.0 s` |
 
 ## How YOLO-Guided Approach Works
 

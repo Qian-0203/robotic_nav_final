@@ -170,7 +170,6 @@ class ArmAutoController:
         publish_period = float(cfg.get("pose_publish_period_sec", 0.25))
         settle_sec = float(cfg.get("pose_settle_sec", 0.5))
         down_steps = int(cfg.get("down_steps", 1))
-        forward_distance = float(cfg.get("forward_distance", 0.08))
 
         for pose_name in ("knob_pre_grasp", "knob_grasp"):
             if not self._move_to_pose(
@@ -194,12 +193,14 @@ class ArmAutoController:
             if should_cancel():
                 return ArmGoal.Result(success=False, message="Canceled by user")
 
-        forward_result = self.move_forward_backward(
-            direction="forward",
-            distance=forward_distance,
-        )
-        if isinstance(forward_result, ArmGoal.Result) and not forward_result.success:
-            return forward_result
+        if not self._move_to_pose(
+            "knob_unlock",
+            publish_count,
+            publish_period,
+            settle_sec,
+            should_cancel,
+        ):
+            return ArmGoal.Result(success=False, message="Canceled by user")
 
         return ArmGoal.Result(success=True, message="knob grasped")
 

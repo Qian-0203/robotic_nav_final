@@ -79,14 +79,17 @@ task3_knob:
       waypoint: knob_stage_1
     - type: NavigateWaypoint
       waypoint: knob_stage_2
+    - type: NavigateWaypoint
+      waypoint: knob_stage_3
     - type: SetTargetLabel
       label: knob
     - type: VisualServo
       label: knob
       phase: align_knob_for_grasp
+      target_depth_m: 0.35
     - type: ArmGoal
       mode: grasp_knob
     - type: TimedDrive
       phase: enter_after_knob
-      action: FORWARD_SLOW
+      action: FORWARD
       config_key: door_enter_sec

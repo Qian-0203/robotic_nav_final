@@ -41,6 +41,11 @@ waypoints:
     frame_id: map
   knob_stage_2:
     x: 3.0
+    y: 2
+    yaw: 0.0
+    frame_id: map
+  knob_stage_3:
+    x: 3.5
     y: 1.5
     yaw: 0.0
     frame_id: map
@@ -90,4 +95,4 @@ visual_servo:
   bridge_descend_sec: 5.0
   bridge_pre_align_y_offset_m: 0.6
   bridge_yaw_180_turn_sec: 5.0
-  door_enter_sec: 2.0
+  door_enter_sec: 20.0
