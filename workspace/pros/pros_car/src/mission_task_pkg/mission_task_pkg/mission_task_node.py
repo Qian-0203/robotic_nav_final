@@ -59,13 +59,6 @@ INITIAL_POSE_COVARIANCE = [
 ]
 
 
-def _is_nearer_offset(candidate, current):
-    """Return True when candidate has a smaller valid forward depth."""
-    if current is None:
-        return True
-    return candidate[0] > 0.0 and candidate[0] < current[0]
-
-
 class MissionTaskNode(Node):
     def __init__(self):
         super().__init__("mission_task_node")
@@ -113,40 +106,31 @@ class MissionTaskNode(Node):
         self.get_logger().info("Mission task server initialized")
 
     def _load_config(self):
-        param_path = self.get_parameter("waypoints_file").value
-        if param_path:
-            config_path = param_path
-        else:
-            try:
-                share_dir = get_package_share_directory("mission_task_pkg")
-                config_path = os.path.join(share_dir, "config", "mission_waypoints.yaml")
-            except Exception:
-                here = os.path.dirname(os.path.dirname(__file__))
-                config_path = os.path.join(here, "config", "mission_waypoints.yaml")
-
-        with open(config_path, "r", encoding="utf-8") as f:
-            config = yaml.safe_load(f)
-
+        config_path = self._config_path("waypoints_file", "mission_waypoints.yaml")
+        config = self._load_yaml(config_path) or {}
         self.get_logger().info(f"Loaded mission config: {config_path}")
         return config
 
     def _load_mission_trees(self):
-        param_path = self.get_parameter("mission_trees_file").value
-        if param_path:
-            config_path = param_path
-        else:
-            try:
-                share_dir = get_package_share_directory("mission_task_pkg")
-                config_path = os.path.join(share_dir, "config", "mission_trees.yaml")
-            except Exception:
-                here = os.path.dirname(os.path.dirname(__file__))
-                config_path = os.path.join(here, "config", "mission_trees.yaml")
-
-        with open(config_path, "r", encoding="utf-8") as f:
-            trees = yaml.safe_load(f) or {}
-
+        config_path = self._config_path("mission_trees_file", "mission_trees.yaml")
+        trees = self._load_yaml(config_path) or {}
         self.get_logger().info(f"Loaded mission behavior trees: {config_path}")
         return trees
+
+    def _config_path(self, parameter_name, filename):
+        param_path = self.get_parameter(parameter_name).value
+        if param_path:
+            return param_path
+        try:
+            base_dir = get_package_share_directory("mission_task_pkg")
+        except Exception:
+            base_dir = os.path.dirname(os.path.dirname(__file__))
+        return os.path.join(base_dir, "config", filename)
+
+    @staticmethod
+    def _load_yaml(path):
+        with open(path, "r", encoding="utf-8") as f:
+            return yaml.safe_load(f)
 
     def goal_callback(self, goal_request):
         if goal_request.task_id not in self.bt_runner.task_ids():
@@ -183,81 +167,77 @@ class MissionTaskNode(Node):
         return result
 
     def _run_bt_primitive(self, node_type, node, goal_handle):
-        if node_type == "PrepareMissionStartPose":
-            self._prepare_mission_start_pose()
-            return
-        if node_type == "SetTargetLabel":
-            self._set_target_label(node["label"])
-            return
-        if node_type == "WaitDetection":
-            label = node["label"]
-            dynamic_cfg = self.config.get("dynamic_approach", {})
-            phase = node.get("phase", f"wait_{label}")
-            self._publish_phase(goal_handle, phase)
-            self._settle_before_detection(goal_handle, label, dynamic_cfg)
-            self._wait_for_detection(goal_handle, label, dynamic_cfg)
-            return
-        if node_type == "NavigateWaypoint":
-            self._navigate(goal_handle, node["waypoint"])
-            return
-        if node_type == "ApproachDetectedTarget":
-            self._approach_detected_target(
+        label = node.get("label")
+        dynamic_cfg = self.config.get("dynamic_approach", {})
+        turn_180_key = node.get("config_key", "bridge_yaw_180_turn_sec")
+        handlers = {
+            "PrepareMissionStartPose": self._prepare_mission_start_pose,
+            "SetTargetLabel": lambda: self._set_target_label(node["label"]),
+            "WaitDetection": lambda: self._wait_detection(
                 goal_handle,
                 node["label"],
-                node.get("phase", f"approach_detected_{node['label']}"),
+                node.get("phase", f"wait_{label}"),
+                dynamic_cfg,
+            ),
+            "NavigateWaypoint": lambda: self._navigate(goal_handle, node["waypoint"]),
+            "ApproachDetectedTarget": lambda: self._approach_detected_target(
+                goal_handle,
+                node["label"],
+                node.get("phase", f"approach_detected_{label}"),
                 node["fallback_waypoint"],
-            )
-            return
-        if node_type == "VisualServo":
-            self._visual_servo(
+            ),
+            "VisualServo": lambda: self._visual_servo(
                 goal_handle,
                 node["label"],
-                node.get("phase", f"align_{node['label']}"),
+                node.get("phase", f"align_{label}"),
                 node,
-            )
-            return
-        if node_type == "ApproachBridgePreAlign":
-            self._approach_bridge_pre_align(
+            ),
+            "ApproachBridgePreAlign": lambda: self._approach_bridge_pre_align(
                 goal_handle,
                 node.get("label", "bridge"),
                 node.get("phase", "approach_bridge_y_offset"),
                 node.get("offset_m"),
-            )
-            return
-        if node_type == "ConditionalBridgeYawTurn":
-            self._conditional_bridge_yaw_turn(
+            ),
+            "ConditionalBridgeYawTurn": lambda: self._conditional_bridge_yaw_turn(
                 goal_handle,
                 node.get("phase", "bridge_yaw_180_ccw_turn"),
                 node.get("action", "COUNTERCLOCKWISE_ROTATION_SLOW"),
                 node.get("config_key", "bridge_yaw_180_turn_sec"),
                 node.get("phase_90", "bridge_yaw_90_cw_turn"),
                 node.get("action_90", "CLOCKWISE_ROTATION_SLOW"),
-                node.get(
-                    "config_key_90",
-                    node.get("config_key", "bridge_yaw_180_turn_sec"),
-                ),
-            )
-            return
-        if node_type == "TimedDrive":
-            self._timed_drive(
+                node.get("config_key_90", turn_180_key),
+            ),
+            "TimedDrive": lambda: self._timed_drive(
                 goal_handle,
                 node["phase"],
                 node["action"],
                 node["config_key"],
-            )
-            return
-        if node_type == "ArmGoal":
-            self._send_arm_goal(goal_handle, node["mode"])
-            return
-        if node_type == "ReturnToStart":
-            self._return_to_start(goal_handle)
-            return
-        raise RuntimeError(f"Unknown behavior tree node type: {node_type}")
+            ),
+            "ArmGoal": lambda: self._send_arm_goal(goal_handle, node["mode"]),
+            "ReturnToStart": lambda: self._return_to_start(goal_handle),
+        }
+        try:
+            handler = handlers[node_type]
+        except KeyError:
+            raise RuntimeError(
+                f"Unknown behavior tree node type: {node_type}"
+            ) from None
+        handler()
+
+    def _wait_detection(self, goal_handle, label, phase, dynamic_cfg):
+        self._publish_phase(goal_handle, phase)
+        self._settle_before_detection(goal_handle, label, dynamic_cfg)
+        self._wait_for_detection(goal_handle, label, dynamic_cfg)
 
     def _approach_detected_target(self, goal_handle, label, phase, fallback_waypoint):
         self._check_cancel(goal_handle)
         self._set_target_label(label)
         dynamic_cfg = self.config.get("dynamic_approach", {})
+        goal_pose_builder = lambda detection: self._build_dynamic_goal_pose(
+            label,
+            detection,
+            dynamic_cfg,
+        )
         if not bool(dynamic_cfg.get("enabled", True)):
             self._fallback_approach(goal_handle, label, fallback_waypoint, "disabled")
             return
@@ -265,12 +245,17 @@ class MissionTaskNode(Node):
         self._publish_phase(goal_handle, phase)
         try:
             if self._use_short_hop_approach(label, dynamic_cfg):
-                self._run_short_hop_approach(goal_handle, label, phase, dynamic_cfg)
+                self._run_short_hop_approach(
+                    goal_handle,
+                    label,
+                    phase,
+                    dynamic_cfg,
+                    goal_pose_builder,
+                )
             else:
                 self._settle_before_detection(goal_handle, label, dynamic_cfg)
                 detection = self._wait_for_detection(goal_handle, label, dynamic_cfg)
-                goal_pose = self._build_dynamic_goal_pose(label, detection, dynamic_cfg)
-                self._publish_goal_pose(goal_pose)
+                self._publish_goal_pose(goal_pose_builder(detection))
                 self._send_nav_goal(goal_handle, "Manual_Nav")
         except MissionCanceled:
             raise
@@ -310,10 +295,7 @@ class MissionTaskNode(Node):
                             f"confidence={float(detection.get('confidence', 0.0)):.3f} "
                             f"offset_flu={detection.get('offset_flu')}"
                         )
-                        return {
-                            "confidence": float(detection.get("confidence", 0.0)),
-                            "offset_flu": [float(v) for v in detection["offset_flu"]],
-                        }
+                        return self._normalized_detection(detection)
                     action = self._bridge_edge_recovery_action(
                         detection,
                         touching_edges,
@@ -348,7 +330,7 @@ class MissionTaskNode(Node):
         label,
         phase,
         dynamic_cfg,
-        full_goal_builder=None,
+        goal_pose_builder,
     ):
         hop_cfg = self._short_hop_config(label, dynamic_cfg)
         max_hops = int(hop_cfg.get("max_hops", 3))
@@ -373,14 +355,7 @@ class MissionTaskNode(Node):
             self._publish_phase(goal_handle, f"{phase}:hop_{hop_idx}")
             self._settle_before_detection(goal_handle, label, dynamic_cfg)
             detection = self._wait_for_detection(goal_handle, label, refresh_cfg)
-            if full_goal_builder is None:
-                full_goal_pose = self._build_dynamic_goal_pose(
-                    label,
-                    detection,
-                    dynamic_cfg,
-                )
-            else:
-                full_goal_pose = full_goal_builder()
+            full_goal_pose = goal_pose_builder(detection)
             hop_goal_pose, is_final_goal = self._build_short_hop_goal_pose(
                 full_goal_pose,
                 step_distance,
@@ -789,6 +764,10 @@ class MissionTaskNode(Node):
             )
         offset_m = float(offset_m)
         dynamic_cfg = self.config.get("dynamic_approach", {})
+        goal_pose_builder = lambda detection: self._build_bridge_pre_align_goal_pose(
+            detection,
+            offset_m,
+        )
 
         if offset_m != 0.0 and self._use_short_hop_approach(label, dynamic_cfg):
             self._run_short_hop_approach(
@@ -796,25 +775,14 @@ class MissionTaskNode(Node):
                 label,
                 phase,
                 dynamic_cfg,
-                full_goal_builder=lambda: self._build_bridge_pre_align_goal_pose(
-                    self._require_full_bridge_detection(label),
-                    offset_m,
-                ),
+                goal_pose_builder,
             )
             return
 
-        detection = self._best_full_detection(label)
-        if detection is None:
-            raise RuntimeError(f"missing full {label} detection")
-
-        goal_pose = self._build_bridge_pre_align_goal_pose(
-            detection,
-            offset_m,
-        )
-        self._publish_goal_pose(goal_pose)
+        self._publish_goal_pose(goal_pose_builder(self._require_detection(label)))
         self._send_nav_goal(goal_handle, "Manual_Nav")
 
-    def _require_full_bridge_detection(self, label):
+    def _require_detection(self, label):
         detection = self._best_full_detection(label)
         if detection is None:
             raise RuntimeError(f"missing full {label} detection")
@@ -1003,6 +971,13 @@ class MissionTaskNode(Node):
             ):
                 best = detection
         return best
+
+    @staticmethod
+    def _normalized_detection(detection):
+        result = dict(detection)
+        result["confidence"] = float(detection.get("confidence", 0.0))
+        result["offset_flu"] = [float(v) for v in detection["offset_flu"]]
+        return result
 
     @staticmethod
     def _bridge_mask_center_offset(detection):
@@ -1202,7 +1177,11 @@ class MissionTaskNode(Node):
                 offset = item.get("offset_flu")
                 if label and isinstance(offset, list) and len(offset) == 3:
                     float_offset = [float(v) for v in offset]
-                    if _is_nearer_offset(float_offset, coordinates.get(label)):
+                    current = coordinates.get(label)
+                    if (
+                        float_offset[0] > 0.0
+                        and (current is None or float_offset[0] < current[0])
+                    ):
                         coordinates[label] = float_offset
             self.object_coordinates = coordinates
         except Exception as exc:
