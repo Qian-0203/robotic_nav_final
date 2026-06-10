@@ -11,6 +11,20 @@
    r  # 進行 colcon build 並執行 . ./install/setup.bash
    ```
 
+### 只重新建置 `mission_task_pkg`
+如果只修改 `mission_task_pkg`，進入 container 後執行：
+```bash
+cd /workspaces
+source /opt/ros/${ROS_DISTRO:-humble}/setup.bash
+colcon build --symlink-install --packages-select mission_task_pkg
+source install/setup.bash
+```
+
+如果同時修改了相依 package，例如 `action_interface`，改用：
+```bash
+colcon build --symlink-install --packages-up-to mission_task_pkg
+```
+
 ## 🚗 車輛控制
 執行以下指令來開始車輛控制：
 ```bash
@@ -64,6 +78,20 @@ ros2 run pros_car_py robot_control
    r  # Run colcon build and source setup.bash
    ```
 
+### Rebuild Only `mission_task_pkg`
+If only `mission_task_pkg` changed, run this inside the container:
+```bash
+cd /workspaces
+source /opt/ros/${ROS_DISTRO:-humble}/setup.bash
+colcon build --symlink-install --packages-select mission_task_pkg
+source install/setup.bash
+```
+
+If a dependency package also changed, such as `action_interface`, use:
+```bash
+colcon build --symlink-install --packages-up-to mission_task_pkg
+```
+
 ## 🚗 Vehicle Control
 Start vehicle control by running:
 ```bash
@@ -102,4 +130,3 @@ There are **two autonomous navigation modes**:
 - **Function**: `car_controller.py` internally **publishes** `/goal_pose` coordinates for automatic navigation.
 
 📢 **Note**: Press `q` at any time to **stop the vehicle immediately** and exit navigation mode.
-

@@ -39,7 +39,7 @@ task2_bridge:
     - type: VisualServo
       label: bridge
       phase: align_bridge_center
-      lateral_tolerance_m: 0.05
+      lateral_tolerance_m: 0.02
       target_depth_m: 1.5
     - type: TimedDrive
       phase: climb_bridge
@@ -53,11 +53,13 @@ task2_bridge:
     - type: VisualServo
       label: bear
       phase: align_bear_for_pickup
+      bear_candidate_min_confidence: 0.4
+      control_speed: fast
     - type: ArmGoal
       mode: pickup_bear
     - type: TimedDrive
       phase: descend_bridge
-      action: BACKWARD_SLOW
+      action: FORWARD
       config_key: bridge_descend_sec
     - type: ReturnToStart
     - type: ArmGoal

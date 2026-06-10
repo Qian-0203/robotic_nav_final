@@ -104,7 +104,7 @@ visual_servo:
   bear_lateral_recovery_max_attempts: 5
   bear_candidate_min_confidence: 0.9
   bridge_cross_sec: 4.0
-  bridge_climb_sec: 5.0
+  bridge_climb_sec: 5.5
   bridge_descend_sec: 3.0
   bridge_pre_align_y_offset_m: 0.6
   bridge_yaw_180_turn_sec: 5.0

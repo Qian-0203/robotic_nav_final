@@ -24,6 +24,7 @@ from std_msgs.msg import String
 
 ACTION_MAPPINGS = {
     "FORWARD": [300.0, 300.0, 300.0, 300.0],
+    "BACKWARD": [-300.0, -300.0, -300.0, -300.0],
     "COUNTERCLOCKWISE_ROTATION": [-300.0, 300.0, -300.0, 300.0],
     "CLOCKWISE_ROTATION": [300.0, -300.0, 300.0, -300.0],
     "FORWARD_SLOW": [100.0, 100.0, 100.0, 100.0],
@@ -31,6 +32,21 @@ ACTION_MAPPINGS = {
     "COUNTERCLOCKWISE_ROTATION_SLOW": [-230.0, 230.0, -230.0, 230.0],
     "CLOCKWISE_ROTATION_SLOW": [230.0, -230.0, 230.0, -230.0],
     "STOP": [0.0, 0.0, 0.0, 0.0],
+}
+
+VISUAL_SERVO_CONTROL_PROFILES = {
+    "slow": {
+        "forward": "FORWARD_SLOW",
+        "backward": "BACKWARD_SLOW",
+        "clockwise": "CLOCKWISE_ROTATION_SLOW",
+        "counterclockwise": "COUNTERCLOCKWISE_ROTATION_SLOW",
+    },
+    "fast": {
+        "forward": "FORWARD",
+        "backward": "BACKWARD",
+        "clockwise": "CLOCKWISE_ROTATION",
+        "counterclockwise": "COUNTERCLOCKWISE_ROTATION",
+    },
 }
 
 INITIAL_POSE_COVARIANCE = [
@@ -201,6 +217,10 @@ class MissionTaskNode(Node):
                 lateral_tolerance=node.get("lateral_tolerance_m"),
                 timeout_sec=node.get("timeout_sec"),
                 allow_missing=bool(node.get("allow_missing", False)),
+                bear_candidate_min_confidence=node.get(
+                    "bear_candidate_min_confidence"
+                ),
+                control_speed=node.get("control_speed", "slow"),
             )
             return
         if node_type == "ApproachBridgePreAlign":
@@ -562,8 +582,11 @@ class MissionTaskNode(Node):
         lateral_tolerance=None,
         timeout_sec=None,
         allow_missing=False,
+        bear_candidate_min_confidence=None,
+        control_speed="slow",
     ):
         servo_cfg = self.config.get("visual_servo", {})
+        control_profile = self._visual_servo_control_profile(control_speed)
         target_depth = float(target_depth or servo_cfg.get("target_depth_m", 0.45))
         lateral_tol = float(
             lateral_tolerance
@@ -585,7 +608,11 @@ class MissionTaskNode(Node):
                 servo_cfg.get("bear_recovery_max_attempts", 5),
             )
         )
-        bear_min_confidence = float(servo_cfg.get("bear_candidate_min_confidence", 0.0))
+        bear_min_confidence = float(
+            bear_candidate_min_confidence
+            if bear_candidate_min_confidence is not None
+            else servo_cfg.get("bear_candidate_min_confidence", 0.0)
+        )
 
         self._publish_phase(goal_handle, phase)
         start = time.monotonic()
@@ -659,7 +686,7 @@ class MissionTaskNode(Node):
                             < bear_lateral_recovery_sec
                         ):
                             self._check_cancel(goal_handle)
-                            self._publish_control("BACKWARD_SLOW")
+                            self._publish_control(control_profile["backward"])
                             time.sleep(min(0.1, bear_lateral_recovery_sec))
                         self._publish_control("STOP")
                         time.sleep(command_period)
@@ -685,11 +712,11 @@ class MissionTaskNode(Node):
                         time.sleep(aligned_settle)
                     return
                 if lateral > lateral_tol:
-                    action = "COUNTERCLOCKWISE_ROTATION_SLOW"
+                    action = control_profile["counterclockwise"]
                 elif lateral < -lateral_tol:
-                    action = "CLOCKWISE_ROTATION_SLOW"
+                    action = control_profile["clockwise"]
                 else:
-                    action = "FORWARD_SLOW"
+                    action = control_profile["forward"]
                 self._log_visual_servo_state(
                     label,
                     phase,
@@ -705,11 +732,11 @@ class MissionTaskNode(Node):
                 previous_lateral = lateral
                 previous_action = action
             else:
-                action = "COUNTERCLOCKWISE_ROTATION_SLOW"
+                action = control_profile["counterclockwise"]
             self._publish_control(action)
             if action in {
-                "CLOCKWISE_ROTATION_SLOW",
-                "COUNTERCLOCKWISE_ROTATION_SLOW",
+                control_profile["clockwise"],
+                control_profile["counterclockwise"],
             }:
                 time.sleep(rotation_settle)
             else:
@@ -720,6 +747,16 @@ class MissionTaskNode(Node):
             self.get_logger().warn(f"{label} was not detected; continuing by waypoint")
             return
         raise RuntimeError(f"Timed out while servoing to {label}")
+
+    def _visual_servo_control_profile(self, control_speed):
+        try:
+            return VISUAL_SERVO_CONTROL_PROFILES[str(control_speed).lower()]
+        except KeyError:
+            valid = ", ".join(sorted(VISUAL_SERVO_CONTROL_PROFILES))
+            raise RuntimeError(
+                f"Unknown visual servo control_speed '{control_speed}'. "
+                f"Expected one of: {valid}"
+            )
 
     def _search_for_target(self, goal_handle, label, phase):
         servo_cfg = self.config.get("visual_servo", {})

@@ -77,6 +77,11 @@ Supported task IDs:
 - `task2_bridge`
 - `task3_knob`
 
+```bash
+colcon build --symlink-install --packages-up-to mission_task_pkg
+```
+
+
 ## What Each Task Does
 
 Tasks are defined in
