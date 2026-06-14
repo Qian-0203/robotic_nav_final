@@ -27,6 +27,7 @@ setup(
         "console_scripts": [
             "mission_task_node = mission_task_pkg.mission_task_node:main",
             "mission_task_client = mission_task_pkg.mission_task_client:main",
+            "mission_sequence_client = mission_task_pkg.mission_sequence_client:main",
         ],
     },
 )

@@ -127,8 +127,10 @@ class ArmAutoController:
         publish_count = int(place_cfg.get("pose_publish_count", 5))
         publish_period = float(place_cfg.get("pose_publish_period_sec", 0.3))
         settle_sec = float(place_cfg.get("pose_settle_sec", 1.0))
+        backward_sec = float(place_cfg.get("backward_sec", 1.0))
+        backward_velocity = float(place_cfg.get("backward_velocity", -300.0))
 
-        for pose_name in ("grasp", "lift", "initial"):
+        for pose_name in ("grasp", "lift"):
             if not self._move_to_pose(
                 pose_name,
                 publish_count,
@@ -137,6 +139,22 @@ class ArmAutoController:
                 should_cancel,
             ):
                 return ArmGoal.Result(success=False, message="Canceled by user")
+
+        if not self._drive_car_for_duration(
+            [backward_velocity] * 4,
+            backward_sec,
+            should_cancel,
+        ):
+            return ArmGoal.Result(success=False, message="Canceled by user")
+
+        if not self._move_to_pose(
+            "initial",
+            publish_count,
+            publish_period,
+            settle_sec,
+            should_cancel,
+        ):
+            return ArmGoal.Result(success=False, message="Canceled by user")
         return ArmGoal.Result(success=True, message="bear placed")
 
     def open_knob(self, should_cancel=lambda: False):
@@ -433,6 +451,25 @@ class ArmAutoController:
             if should_cancel():
                 return False
         return True
+
+    def _drive_car_for_duration(
+        self,
+        velocity,
+        duration_sec,
+        should_cancel=lambda: False,
+    ):
+        if duration_sec <= 0.0:
+            return True
+        end_time = time.monotonic() + duration_sec
+        try:
+            while time.monotonic() < end_time:
+                if should_cancel():
+                    return False
+                self.arm_commute_node.publish_control(vel=velocity)
+                time.sleep(0.1)
+            return True
+        finally:
+            self.arm_commute_node.publish_control(vel=[0.0, 0.0, 0.0, 0.0])
 
     def open_gripper(self):
         for joint_idx in GRIPPER_JOINT_INDICES:

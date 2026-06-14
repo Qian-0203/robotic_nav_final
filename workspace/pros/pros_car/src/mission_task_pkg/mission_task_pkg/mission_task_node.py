@@ -178,6 +178,7 @@ class MissionTaskNode(Node):
                 node["label"],
                 node.get("phase", f"wait_{label}"),
                 dynamic_cfg,
+                node.get("fallback_waypoint"),
             ),
             "NavigateWaypoint": lambda: self._navigate(goal_handle, node["waypoint"]),
             "ApproachDetectedTarget": lambda: self._approach_detected_target(
@@ -224,10 +225,27 @@ class MissionTaskNode(Node):
             ) from None
         handler()
 
-    def _wait_detection(self, goal_handle, label, phase, dynamic_cfg):
+    def _wait_detection(
+        self,
+        goal_handle,
+        label,
+        phase,
+        dynamic_cfg,
+        fallback_waypoint=None,
+    ):
         self._publish_phase(goal_handle, phase)
         self._settle_before_detection(goal_handle, label, dynamic_cfg)
-        self._wait_for_detection(goal_handle, label, dynamic_cfg)
+        try:
+            self._wait_for_detection(goal_handle, label, dynamic_cfg)
+        except MissionCanceled:
+            raise
+        except Exception as exc:
+            if not fallback_waypoint:
+                raise
+            self.get_logger().warn(
+                f"Waiting for {label} detection failed: {exc}; using fallback"
+            )
+            self._fallback_approach(goal_handle, label, fallback_waypoint, str(exc))
 
     def _approach_detected_target(self, goal_handle, label, phase, fallback_waypoint):
         self._check_cancel(goal_handle)

@@ -21,16 +21,16 @@ initial_pose:
 waypoints:
   start:
     x: 0.0
-    y: 0.0
+    y: -0.2
     yaw: 0.0
     frame_id: map
   bear_approach:
-    x: 0.25
-    y: 0.25
+    x: 0.35
+    y: 0.35
     yaw: 0.0
     frame_id: map
   bridge_return_midpoint:
-    x: 1.0
+    x: 0.0
     y: 3.0
     yaw: 0.0
     frame_id: map
@@ -40,7 +40,7 @@ waypoints:
     yaw: 0.0
     frame_id: map
   knob_stage_2:
-    x: 3.0
+    x: 2.5
     y: 2
     yaw: 0.0
     frame_id: map
@@ -51,7 +51,7 @@ waypoints:
     frame_id: map
 dynamic_approach:
   enabled: true
-  detection_timeout_sec: 45.0
+  detection_timeout_sec: 15.0
   amcl_settle_before_detection_sec:
     default: 3.0
     bridge: 1.0
@@ -70,7 +70,7 @@ dynamic_approach:
       max_hops: 8
       step_distance_m: 1.5
       goal_tolerance_m: 0.1
-      detection_refresh_timeout_sec: 20.0
+      detection_refresh_timeout_sec: 5.0
     bear:
       enabled: true
       detection_refresh_timeout_sec: 5.0
@@ -85,8 +85,8 @@ visual_servo:
   command_period_sec: 0.2
   rotation_settle_sec: 0.35
   aligned_settle_sec: 2.0
-  timeout_sec: 50.0
-  search_timeout_sec: 50.0
+  timeout_sec: 30.0
+  search_timeout_sec: 30.0
   bear_recovery_depth_m: 1.0
   bear_lateral_recovery_backward_sec: 1.0
   bear_lateral_recovery_max_attempts: 5

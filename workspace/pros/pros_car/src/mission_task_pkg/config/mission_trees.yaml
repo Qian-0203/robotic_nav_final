@@ -29,6 +29,7 @@ task2_bridge:
     - type: WaitDetection
       label: bridge
       phase: wait_bridge_segmentation
+      fallback_waypoint: bear_approach
     - type: ApproachBridgePreAlign
       label: bridge
       phase: approach_bridge_y_offset
@@ -75,6 +76,80 @@ task3_knob:
   type: Sequence
   children:
     - type: PrepareMissionStartPose
+    - type: NavigateWaypoint
+      waypoint: knob_stage_1
+    - type: NavigateWaypoint
+      waypoint: knob_stage_2
+    - type: NavigateWaypoint
+      waypoint: knob_stage_3
+    - type: SetTargetLabel
+      label: knob
+    - type: VisualServo
+      label: knob
+      phase: align_knob_for_grasp
+      target_depth_m: 0.35
+    - type: ArmGoal
+      mode: grasp_knob
+    - type: TimedDrive
+      phase: enter_after_knob
+      action: FORWARD
+      config_key: door_enter_sec
+
+# Sequence-only variants keep AMCL/initialpose from being reset between missions.
+task2_bridge_no_init:
+  type: Sequence
+  children:
+    - type: SetTargetLabel
+      label: bridge
+    - type: WaitDetection
+      label: bridge
+      phase: wait_bridge_segmentation
+      fallback_waypoint: bear_approach
+    - type: ApproachBridgePreAlign
+      label: bridge
+      phase: approach_bridge_y_offset
+    - type: ConditionalBridgeYawTurn
+      phase: bridge_yaw_180_ccw_turn
+      action: COUNTERCLOCKWISE_ROTATION
+      config_key: bridge_yaw_180_turn_sec
+      phase_90: bridge_yaw_90_cw_turn
+      action_90: CLOCKWISE_ROTATION
+      config_key_90: bridge_yaw_180_turn_sec
+    - type: VisualServo
+      label: bridge
+      phase: align_bridge_center
+      lateral_tolerance_m: 0.02
+      target_depth_m: 1.5
+    - type: SetTargetLabel
+      label: bear
+    - type: WaitDetection
+      label: bear
+      phase: wait_bear_before_climb
+    - type: VisualServo
+      label: bear
+      phase: align_bear_center_before_climb
+      target_depth_m: 100.0
+      bear_candidate_min_confidence: 0.4
+      control_speed: slow
+    - type: TimedDrive
+      phase: climb_bridge
+      action: FORWARD
+      config_key: bridge_climb_sec
+    - type: ArmGoal
+      mode: pickup_bear
+    - type: TimedDrive
+      phase: descend_bridge
+      action: FORWARD
+      config_key: bridge_descend_sec
+    - type: NavigateWaypoint
+      waypoint: bridge_return_midpoint
+    - type: ReturnToStart
+    - type: ArmGoal
+      mode: place_bear
+
+task3_knob_no_init:
+  type: Sequence
+  children:
     - type: NavigateWaypoint
       waypoint: knob_stage_1
     - type: NavigateWaypoint

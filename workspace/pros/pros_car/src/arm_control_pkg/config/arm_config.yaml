@@ -77,6 +77,8 @@ place_bear:
   pose_publish_count: 5
   pose_publish_period_sec: 0.3
   pose_settle_sec: 1.0
+  backward_sec: 0.5
+  backward_velocity: -300.0
 grasp_knob:
   pose_publish_count: 5
   pose_publish_period_sec: 0.25

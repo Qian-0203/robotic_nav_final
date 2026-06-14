@@ -127,9 +127,14 @@ class BehaviorTreeRunnerTest(unittest.TestCase):
         servo_cfg = config["visual_servo"]
 
         for node in _walk_tree_nodes(trees):
-            if node.get("type") in {"NavigateWaypoint", "ApproachDetectedTarget"}:
+            if node.get("type") in {
+                "NavigateWaypoint",
+                "ApproachDetectedTarget",
+                "WaitDetection",
+            }:
                 waypoint = node.get("waypoint", node.get("fallback_waypoint"))
-                self.assertIn(waypoint, waypoints)
+                if waypoint is not None:
+                    self.assertIn(waypoint, waypoints)
             if node.get("type") in {"TimedDrive", "ConditionalBridgeYawTurn"}:
                 self.assertIn(node["config_key"], servo_cfg)
                 if "config_key_90" in node:
