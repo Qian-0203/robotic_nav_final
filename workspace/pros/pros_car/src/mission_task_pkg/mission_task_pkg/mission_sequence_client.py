@@ -9,8 +9,12 @@ from std_msgs.msg import String
 
 
 DEFAULT_TASK_IDS = ["task1_bear", "task2_bridge_no_init", "task3_knob_no_init"]
+SEQUENCE_MODES = {
+    "mode1": DEFAULT_TASK_IDS,
+    "mode2": ["task2_bridge", "task3_knob_no_init"],
+}
 HEADING_ADJUST_ACTION = "COUNTERCLOCKWISE_ROTATION"
-HEADING_ADJUST_SEC = 10.0
+HEADING_ADJUST_SEC = 8
 CONTROL_PERIOD_SEC = 0.2
 
 
@@ -22,12 +26,12 @@ class MissionSequenceClient(Node):
             String, "car_control_signal", 10
         )
 
-    def run_sequence(self, task_ids):
+    def run_sequence(self, task_ids, skip_first_heading_adjust=False):
         if not self.client.wait_for_server(timeout_sec=10.0):
             raise RuntimeError("mission_task_server is not available")
 
         for index, task_id in enumerate(task_ids, start=1):
-            if index in (2, 3):
+            if self._needs_heading_adjust(task_id, index, skip_first_heading_adjust):
                 self._adjust_heading_before_task(index, task_id)
             self.get_logger().info(
                 f"Starting mission {index}/{len(task_ids)}: {task_id}"
@@ -70,6 +74,12 @@ class MissionSequenceClient(Node):
             self._publish_control("STOP")
             time.sleep(CONTROL_PERIOD_SEC)
 
+    @staticmethod
+    def _needs_heading_adjust(task_id, index, skip_first_heading_adjust):
+        if skip_first_heading_adjust and index == 1:
+            return False
+        return task_id.startswith(("task2", "task3"))
+
     def _publish_control(self, action):
         msg = String()
         msg.data = f"Mission_Control:{action}"
@@ -82,9 +92,17 @@ class MissionSequenceClient(Node):
 def main(args=None):
     rclpy.init(args=args)
     node = MissionSequenceClient()
-    task_ids = sys.argv[1:] or DEFAULT_TASK_IDS
+    cli_args = sys.argv[1:]
+    skip_first_heading_adjust = False
+    if not cli_args:
+        task_ids = DEFAULT_TASK_IDS
+    elif len(cli_args) == 1 and cli_args[0] in SEQUENCE_MODES:
+        task_ids = SEQUENCE_MODES[cli_args[0]]
+        skip_first_heading_adjust = cli_args[0] == "mode2"
+    else:
+        task_ids = cli_args
     try:
-        node.run_sequence(task_ids)
+        node.run_sequence(task_ids, skip_first_heading_adjust)
     finally:
         node.destroy_node()
         rclpy.shutdown()

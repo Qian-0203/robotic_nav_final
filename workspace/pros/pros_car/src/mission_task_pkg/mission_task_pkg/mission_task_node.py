@@ -592,12 +592,6 @@ class MissionTaskNode(Node):
             float(servo_cfg.get("bear_recovery_depth_m", 1.5)),
             target_depth,
         )
-        bear_lateral_recovery_sec = float(
-            servo_cfg.get("bear_lateral_recovery_backward_sec", 1.0)
-        )
-        bear_lateral_recovery_max_attempts = int(
-            servo_cfg.get("bear_lateral_recovery_max_attempts", 5)
-        )
         bear_min_confidence = float(
             servo_cfg.get("bear_candidate_min_confidence", 0.0)
         )
@@ -605,7 +599,6 @@ class MissionTaskNode(Node):
         self._publish_phase(goal_handle, phase)
         start = time.monotonic()
         saw_target = False
-        bear_lateral_recovery_attempts = 0
         previous_lateral = None
         previous_action = None
 
@@ -656,32 +649,6 @@ class MissionTaskNode(Node):
                             depth,
                             bear_recovery_depth,
                         )
-                    if (
-                        depth <= default_target_depth + depth_tol
-                        and abs(lateral) > lateral_tol
-                        and bear_lateral_recovery_sec > 0.0
-                        and bear_lateral_recovery_attempts
-                        < bear_lateral_recovery_max_attempts
-                    ):
-                        bear_lateral_recovery_attempts += 1
-                        self.get_logger().warn(
-                            "Bear reached target depth but lateral is outside "
-                            f"tolerance; backing up for "
-                            f"{bear_lateral_recovery_sec:.1f}s "
-                            f"(attempt {bear_lateral_recovery_attempts}/"
-                            f"{bear_lateral_recovery_max_attempts})"
-                        )
-                        recovery_start = time.monotonic()
-                        while (
-                            time.monotonic() - recovery_start
-                            < bear_lateral_recovery_sec
-                        ):
-                            self._check_cancel(goal_handle)
-                            self._publish_control(control_profile["backward"])
-                            time.sleep(min(0.1, bear_lateral_recovery_sec))
-                        self._publish_control("STOP")
-                        time.sleep(command_period)
-                        continue
                 if abs(lateral) <= lateral_tol and depth <= target_depth + depth_tol:
                     self._log_visual_servo_state(
                         label,
