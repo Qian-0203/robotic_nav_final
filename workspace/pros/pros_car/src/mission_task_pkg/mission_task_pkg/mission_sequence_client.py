@@ -11,7 +11,7 @@ from std_msgs.msg import String
 DEFAULT_TASK_IDS = ["task1_bear", "task2_bridge_no_init", "task3_knob_no_init"]
 SEQUENCE_MODES = {
     "mode1": DEFAULT_TASK_IDS,
-    "mode2": ["task2_bridge", "task3_knob_no_init"],
+    "mode2": ["task2_bridge_direct", "task3_knob_no_init"],
 }
 HEADING_ADJUST_ACTION = "COUNTERCLOCKWISE_ROTATION"
 HEADING_ADJUST_SEC = 8

@@ -25,13 +25,18 @@ waypoints:
     yaw: 0.0
     frame_id: map
   bear_approach:
-    x: -0.15
+    x: 3.0
+    y: 1.5
+    yaw: 0.0
+    frame_id: map
+  bridge_direct_approach:
+    x: 2.5
     y: 1.5
     yaw: 0.0
     frame_id: map
   bridge_return_midpoint:
-    x: 1.0
-    y: 3.0
+    x: 2.0
+    y: 1.0
     yaw: 0.0
     frame_id: map
   knob_stage_1:
@@ -45,13 +50,13 @@ waypoints:
     yaw: 0.0
     frame_id: map
   knob_stage_3:
-    x: 3.5
-    y: 1.5
+    x: 3.2
+    y: 1.2
     yaw: 0.0
     frame_id: map
 dynamic_approach:
   enabled: true
-  detection_timeout_sec: 15.0
+  detection_timeout_sec: 25
   amcl_settle_before_detection_sec:
     default: 1.0
     bridge: 1.0
@@ -76,7 +81,7 @@ dynamic_approach:
       detection_refresh_timeout_sec: 5.0
     bridge:
       enabled: true
-      detection_refresh_timeout_sec: 10.0
+      detection_refresh_timeout_sec: 35.0
 
 visual_servo:
   target_depth_m: 0.39
@@ -90,7 +95,8 @@ visual_servo:
   bear_recovery_depth_m: 1.0
   bear_candidate_min_confidence: 0.9
   bridge_climb_sec: 5.0
-  bridge_descend_sec: 5.0
-  bridge_pre_align_y_offset_m: 0.6
+  bridge_descend_sec: 4.7
+  bridge_pre_align_y_offset_m: -0.6
   bridge_yaw_180_turn_sec: 5.0
+  bridge_yaw_90_turn_sec: 2.5
   door_enter_sec: 20.0
